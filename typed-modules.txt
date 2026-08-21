@@ -1,0 +1,21 @@
+# Modules that must pass mypy. CI gates on exactly this list.
+#
+# Every security-critical module is here. Adding a module means fixing its
+# type errors first; removing one requires a reason in the pull request.
+# The remainder of src/orchestrator is reported but not gated — that debt is
+# tracked in docs/production-readiness.md rather than hidden behind `|| true`.
+src/orchestrator/api/app.py
+src/orchestrator/api/identity.py
+src/orchestrator/api/ratelimit.py
+src/orchestrator/api/security.py
+src/orchestrator/api/tokens.py
+src/orchestrator/config/profiles.py
+src/orchestrator/core/state/migrations.py
+src/orchestrator/core/state/postgres_store.py
+src/orchestrator/evaluation/cases.py
+src/orchestrator/evaluation/runner.py
+src/orchestrator/llm/dataflow.py
+src/orchestrator/observability/metrics.py
+src/orchestrator/tools/egress.py
+src/orchestrator/tools/execpolicy.py
+src/orchestrator/api/shared_tokens.py

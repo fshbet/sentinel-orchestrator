@@ -1,0 +1,191 @@
+# Multi-instance production deployment.
+#
+# Runs with plain `docker compose up -d` — no Swarm. An earlier version used
+# `deploy.replicas`, which `docker compose` ignores outside Swarm mode: it
+# started one container and the file claimed two. Replicas are therefore
+# declared as named services (orchestrator-1, orchestrator-2) sharing one
+# config and one database, which is what actually happens.
+#
+# Ordering matters and is enforced, not assumed:
+#
+#   postgres  →  migrate (one-shot, runs to completion)  →  orchestrator-N
+#
+# The orchestrator services wait on `migrate` completing *successfully*
+# (`service_completed_successfully`), so a failed migration stops the
+# deployment instead of leaving replicas running against a half-migrated
+# schema. Their own config sets `apply_migrations: false` for the same reason.
+#
+# Nothing in this file contains a credential. Secrets arrive as environment
+# variables, and `${VAR:?message}` fails the deployment early if one is unset
+# rather than starting something half-configured.
+
+name: orchestrator
+
+x-orchestrator: &orchestrator
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  environment:
+    # The mounted production config, selected explicitly.
+    ORCHESTRATOR_CONFIG: /etc/orchestrator/config.yaml
+    ORCHESTRATOR_POSTGRES_DSN: ${ORCHESTRATOR_POSTGRES_DSN:?set this}
+    ORCHESTRATOR_TOKEN_OPS: ${ORCHESTRATOR_TOKEN_OPS:?set this}
+    ORCHESTRATOR_TOKEN_PROMETHEUS: ${ORCHESTRATOR_TOKEN_PROMETHEUS:?set this}
+    ORCHESTRATOR_TOKEN_CI: ${ORCHESTRATOR_TOKEN_CI:?set this}
+    ORCHESTRATOR_TOKEN_ADMIN: ${ORCHESTRATOR_TOKEN_ADMIN:?set this}
+    # All outbound HTTP goes through the egress proxy, which re-checks the
+    # destination at connect time — closing the DNS-rebinding window the
+    # application's own egress policy documents and cannot close.
+    HTTPS_PROXY: http://egress:3128
+    HTTP_PROXY: http://egress:3128
+    NO_PROXY: postgres,egress,localhost,127.0.0.1
+  volumes:
+    - ./config.production.yaml:/etc/orchestrator/config.yaml:ro
+  # Hardening. Each line removes something the process does not need.
+  read_only: true
+  tmpfs:
+    # The only writable paths. The workspace is declared in the config; there
+    # is no writable application directory and no state on disk at all.
+    - /tmp:mode=1777,size=64m
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  user: "10001:10001"
+  healthcheck:
+    # Liveness, not readiness: restarting on readiness turns a brief provider
+    # outage into a crash loop.
+    test: ["CMD", "python", "-c",
+           "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/live',timeout=4).status==200 else 1)"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 15s
+  depends_on:
+    postgres:
+      condition: service_healthy
+    migrate:
+      condition: service_completed_successfully
+  networks: [internal]
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: orchestrator-caddy
+    restart: unless-stopped
+    # Parameterised so a test run can use free ports. Production leaves
+    # them at the defaults; the smoke test moves them out of the way of
+    # whatever else is on the host.
+    ports:
+      - "${CADDY_HTTPS_PORT:-443}:443"
+      - "${CADDY_HTTP_PORT:-80}:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    # `service_started`, not the default: the default re-evaluates the whole
+    # dependency chain including the one-shot `migrate`, which has already
+    # exited — Compose then reports "service migrate didn't complete
+    # successfully" and refuses to start Caddy at all.
+    depends_on:
+      orchestrator-1:
+        condition: service_started
+      orchestrator-2:
+        condition: service_started
+    networks:
+      edge:
+      internal:
+        # Pinned so the orchestrator's api.trusted_proxies can name it.
+        # Without a fixed address, "believe forwarded headers from the proxy"
+        # has nothing to match against.
+        ipv4_address: 172.28.0.10
+
+  # One-shot. Runs to completion, then exits. The orchestrator services will
+  # not start until it exits zero.
+  migrate:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command: ["orchestrator", "migrate", "--apply"]
+    environment:
+      ORCHESTRATOR_CONFIG: /etc/orchestrator/config.yaml
+      ORCHESTRATOR_POSTGRES_DSN: ${ORCHESTRATOR_POSTGRES_DSN:?set this}
+    volumes:
+      - ./config.production.yaml:/etc/orchestrator/config.yaml:ro
+    read_only: true
+    tmpfs: ["/tmp:mode=1777,size=16m"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    user: "10001:10001"
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+
+  orchestrator-1:
+    <<: *orchestrator
+    container_name: orchestrator-1
+
+  orchestrator-2:
+    <<: *orchestrator
+    container_name: orchestrator-2
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: orchestrator
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set this}
+      POSTGRES_DB: orchestrator
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orchestrator -d orchestrator"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Not on the edge network: nothing outside this stack reaches it.
+    networks: [internal]
+
+  egress:
+    # Every outbound request passes through here. This is the layer that can
+    # re-check the destination at connect time, which is the residual gap the
+    # application's egress policy documents.
+    image: ubuntu/squid:latest
+    restart: unless-stopped
+    volumes:
+      - ./squid.conf:/etc/squid/squid.conf:ro
+    networks: [internal, egress]
+
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set this}
+    volumes: [./backups:/backups]
+    entrypoint: >-
+      sh -c 'while true; do
+        pg_dump -h postgres -U orchestrator orchestrator
+          | gzip > /backups/orchestrator-$$(date +%%F-%%H%%M).sql.gz;
+        find /backups -name "*.sql.gz" -mtime +14 -delete;
+        sleep 86400;
+      done'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  edge:
+  internal:
+    internal: true      # no direct outbound; egress goes through the proxy
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+  egress:

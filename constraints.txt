@@ -1,0 +1,38 @@
+# Reproducible builds for the optional extras.
+#
+# Why a constraints file rather than a lockfile: the core has zero third-party
+# dependencies (ADR-011), and everything below is optional. A full lockfile
+# would pin transitive trees for extras most installs never enable, and would
+# need regenerating per Python version and platform. Constraints pin the
+# direct, security-relevant surface while leaving resolution to pip.
+#
+# Regenerate with:
+#   pip install -e ".[all]" && pip freeze > constraints.lock.txt
+# and commit the .lock.txt for a build you need bit-reproducible.
+#
+# Upper bounds are deliberate: an unbounded range means a future major
+# release lands in production without anyone choosing it.
+
+# API
+fastapi>=0.110,<1.0
+uvicorn>=0.29,<1.0
+pydantic>=2.6,<3.0
+
+# Config
+PyYAML>=6.0,<7.0
+
+# HTTP providers and MCP transport
+httpx>=0.27,<1.0
+
+# CLI
+typer>=0.12,<1.0
+rich>=13.0,<15.0
+
+# Multi-instance state
+asyncpg>=0.29,<1.0
+
+# Build backend. >=83 clears PYSEC-2026-3447.
+setuptools>=83
+
+# Tooling
+pytest>=8.0,<9.0

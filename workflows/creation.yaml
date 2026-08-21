@@ -1,0 +1,36 @@
+# Example B from the specification: plan, create, validate, review, deliver.
+id: generic.creation
+version: 1.0.0
+description: Produce something, check it independently, and hand it over.
+pattern: sequential
+steps:
+  - name: plan
+    objective: >
+      State precisely what must be produced, what it must contain, and what
+      would count as evidence that it is finished.
+    expected_outputs: [specification, acceptance_evidence]
+    validations: [{validator: non_empty, mandatory: true}]
+  - name: create
+    objective: >
+      Produce the thing described by the specification. Use only the tools you
+      were granted, and report any part you could not produce.
+    expected_outputs: [artifact]
+    validations: [{validator: non_empty, mandatory: true}]
+  - name: validate
+    objective: >
+      Check the produced work against the specification. Report each acceptance
+      criterion as met, unmet, or unverifiable, with the observation behind it.
+    expected_outputs: [validation_report]
+    validations: [{validator: non_empty, mandatory: true}]
+  - name: review
+    objective: >
+      Judge whether the work as validated actually satisfies the original
+      objective, not merely the specification derived from it.
+    expected_outputs: [review]
+    validations: [{validator: non_empty, mandatory: true}]
+  - name: deliver
+    objective: >
+      Assemble the final deliverable and state plainly what is verified, what is
+      unverified, and what was left out.
+    expected_outputs: [deliverable]
+    validations: [{validator: non_empty, mandatory: true}]

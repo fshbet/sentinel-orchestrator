@@ -1,0 +1,23 @@
+# A coordinator that decomposes, workers that execute, and a synthesis step.
+id: generic.orchestrator_worker
+version: 1.0.0
+description: One coordinator, several workers, one synthesis.
+pattern: orchestrator_worker
+steps:
+  - name: coordinate
+    objective: >
+      Break the objective into independent pieces of work and state what each
+      worker must return.
+    expected_outputs: [decomposition]
+    validations: [{validator: non_empty, mandatory: true}]
+  - name: worker_one
+    objective: Execute the first piece of work assigned by the coordinator.
+    validations: [{validator: non_empty, mandatory: true}]
+  - name: worker_two
+    objective: Execute the second piece of work assigned by the coordinator.
+    validations: [{validator: non_empty, mandatory: true}]
+options:
+  synthesis:
+    name: synthesise
+    objective: Combine the worker results into a single answer to the objective.
+    validations: [{validator: non_empty, mandatory: true}]

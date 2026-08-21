@@ -1,0 +1,902 @@
+<title>Proof, Not Promises</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;0,700;1,400&display=swap">
+
+<style>
+  /* ---------------------------------------------------------------
+     Light palette. Every token defined here; the dark blocks below
+     only redefine, never introduce.
+     --------------------------------------------------------------- */
+  :root {
+    --paper:        #F5F7F9;
+    --surface:      #FFFFFF;
+    --surface-sunk: #EDF1F4;
+    --ink:          #14202E;
+    --ink-soft:     #46586B;
+    --ink-faint:    #7C8CA0;
+    --rule:         #D6DFE6;
+    --rule-strong:  #B9C6D1;
+
+    --accent:       #1B6B75;
+    --accent-soft:  #E2EFF0;
+    --accent-ink:   #0E4A52;
+
+    --confirmed:    #2E7D5B;
+    --likely:       #4E7AA6;
+    --uncertain:    #AD7522;
+    --blocked:      #6B6275;
+    --failed:       #A33C3C;
+
+    --confirmed-bg: #E4F1EA;
+    --likely-bg:    #E6EEF6;
+    --uncertain-bg: #F7EEDC;
+    --blocked-bg:   #EDEAF0;
+    --failed-bg:    #F7E5E5;
+
+    --shadow: 0 1px 2px rgba(20, 32, 46, .05), 0 8px 24px -12px rgba(20, 32, 46, .18);
+
+    --measure: 66ch;
+    --display: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+    --body:    "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono:    "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:        #101820;
+      --surface:      #17222C;
+      --surface-sunk: #0C131A;
+      --ink:          #E4EBF1;
+      --ink-soft:     #A5B4C2;
+      --ink-faint:    #6F8091;
+      --rule:         #26333F;
+      --rule-strong:  #38495798;
+
+      --accent:       #5BB8C2;
+      --accent-soft:  #143236;
+      --accent-ink:   #8FD6DE;
+
+      --confirmed:    #6DC79B;
+      --likely:       #86B0DA;
+      --uncertain:    #DDA84F;
+      --blocked:      #A79BB4;
+      --failed:       #DE8484;
+
+      --confirmed-bg: #142C22;
+      --likely-bg:    #16242F;
+      --uncertain-bg: #2E2415;
+      --blocked-bg:   #221E28;
+      --failed-bg:    #2E1A1A;
+
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -14px rgba(0, 0, 0, .7);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:        #101820;
+    --surface:      #17222C;
+    --surface-sunk: #0C131A;
+    --ink:          #E4EBF1;
+    --ink-soft:     #A5B4C2;
+    --ink-faint:    #6F8091;
+    --rule:         #26333F;
+    --rule-strong:  #384957;
+
+    --accent:       #5BB8C2;
+    --accent-soft:  #143236;
+    --accent-ink:   #8FD6DE;
+
+    --confirmed:    #6DC79B;
+    --likely:       #86B0DA;
+    --uncertain:    #DDA84F;
+    --blocked:      #A79BB4;
+    --failed:       #DE8484;
+
+    --confirmed-bg: #142C22;
+    --likely-bg:    #16242F;
+    --uncertain-bg: #2E2415;
+    --blocked-bg:   #221E28;
+    --failed-bg:    #2E1A1A;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -14px rgba(0, 0, 0, .7);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 78rem;
+    margin: 0 auto;
+    padding: 0 clamp(1rem, 4vw, 3rem);
+  }
+
+  /* Reading column with an annotation rail, like markup on a drawing. */
+  .doc {
+    display: grid;
+    grid-template-columns: 8.5rem minmax(0, var(--measure));
+    gap: 0 2.5rem;
+    justify-content: center;
+  }
+  @media (max-width: 62rem) {
+    .doc { grid-template-columns: minmax(0, 1fr); }
+    .rail { display: none; }
+  }
+
+  .rail {
+    font-family: var(--mono);
+    font-size: .68rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    text-align: right;
+    padding-top: .55rem;
+    border-right: 1px solid var(--rule);
+    padding-right: 1.1rem;
+    align-self: stretch;
+  }
+  .rail span { position: sticky; top: 1.5rem; display: block; }
+
+  section { padding-block: clamp(2.5rem, 5vw, 4rem); }
+  section + section > .rail,
+  section + section > .col { border-top: 0; }
+
+  .col > * + * { margin-top: 1.1rem; }
+  .col > h2 + * { margin-top: 1.4rem; }
+
+  /* ---- type ---- */
+  h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.2; }
+  h1 { font-size: clamp(2.6rem, 6vw, 4.1rem); font-weight: 700; letter-spacing: -.02em; }
+  h2 { font-size: clamp(1.6rem, 3vw, 2.1rem); font-weight: 600; letter-spacing: -.015em; }
+  h3 { font-size: 1.15rem; font-weight: 600; }
+  p  { margin: 0; }
+  strong { font-weight: 600; }
+  em { font-style: italic; }
+
+  a { color: var(--accent-ink); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px;
+  }
+
+  .lede { font-size: 1.22rem; color: var(--ink-soft); line-height: 1.6; }
+  .kicker {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--accent-ink); margin: 0;
+  }
+
+  code, .mono { font-family: var(--mono); font-size: .87em; }
+  code:not(pre code) {
+    background: var(--surface-sunk); padding: .12em .38em;
+    border-radius: 3px; border: 1px solid var(--rule);
+  }
+
+  pre {
+    margin: 0; background: var(--surface-sunk); color: var(--ink);
+    border: 1px solid var(--rule); border-radius: 6px;
+    padding: 1rem 1.15rem; overflow-x: auto;
+    font-family: var(--mono); font-size: .82rem; line-height: 1.6;
+  }
+  pre .c { color: var(--ink-faint); }
+  pre .k { color: var(--accent-ink); }
+
+  ul, ol { margin: 0; padding-left: 1.25rem; }
+  li + li { margin-top: .5rem; }
+  li::marker { color: var(--ink-faint); }
+
+  /* ---- masthead ---- */
+  .masthead {
+    border-bottom: 1px solid var(--rule);
+    padding-block: clamp(3.5rem, 9vw, 6.5rem) clamp(2.5rem, 5vw, 4rem);
+  }
+  .masthead .inner { max-width: 52rem; margin: 0 auto; }
+  .masthead h1 { margin-top: 1.1rem; }
+  .masthead .lede { margin-top: 1.5rem; max-width: 40rem; }
+  .stamp {
+    display: inline-flex; align-items: center; gap: .55rem;
+    font-family: var(--mono); font-size: .7rem; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent-ink);
+    border: 1px solid var(--accent); border-radius: 999px;
+    padding: .4rem .85rem; background: var(--accent-soft);
+  }
+  .stamp::before {
+    content: ""; width: .45rem; height: .45rem; border-radius: 50%;
+    background: var(--accent); flex: none;
+  }
+
+  /* ---- callout ---- */
+  .callout {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 6px 6px 0; padding: 1.15rem 1.35rem;
+    box-shadow: var(--shadow);
+  }
+  .callout p + p { margin-top: .7rem; }
+  .callout .label {
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .13em;
+    text-transform: uppercase; color: var(--accent-ink);
+    display: block; margin-bottom: .5rem;
+  }
+
+  /* ---- split panel: who decides what ---- */
+  .split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+  @media (max-width: 40rem) { .split { grid-template-columns: minmax(0, 1fr); } }
+  .panel {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 6px; padding: 1.15rem 1.25rem;
+  }
+  .panel h3 { font-family: var(--body); font-size: .78rem; letter-spacing: .12em;
+              text-transform: uppercase; color: var(--ink-faint); font-weight: 600; }
+  .panel ul { margin-top: .8rem; padding-left: 1.05rem; }
+  .panel li { font-size: .95rem; }
+  .panel.is-model { border-top: 3px solid var(--likely); }
+  .panel.is-code  { border-top: 3px solid var(--confirmed); }
+
+  /* ---- steps ---- */
+  .steps { display: flex; flex-direction: column; gap: 0; counter-reset: step; }
+  .step {
+    display: grid; grid-template-columns: 2.4rem minmax(0, 1fr);
+    gap: 0 1.1rem; padding-block: 1.05rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  .step:first-child { border-top: 1px solid var(--rule); }
+  .step .n {
+    counter-increment: step;
+    font-family: var(--mono); font-size: .78rem; font-weight: 500;
+    color: var(--accent-ink); padding-top: .18rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .step .n::before { content: counter(step, decimal-leading-zero); }
+  .step h3 { margin-bottom: .3rem; }
+  .step p { font-size: .97rem; color: var(--ink-soft); }
+  .step .aside {
+    margin-top: .5rem; font-size: .87rem; color: var(--ink-faint);
+    border-left: 2px solid var(--rule); padding-left: .8rem;
+  }
+
+  /* ---- confidence ladder ---- */
+  .ladder { display: flex; flex-direction: column; gap: .5rem; }
+  .rung {
+    display: grid; grid-template-columns: 7.5rem minmax(0, 1fr);
+    gap: 1rem; align-items: start;
+    border-radius: 5px; padding: .75rem .9rem;
+    border: 1px solid var(--rule);
+  }
+  @media (max-width: 34rem) { .rung { grid-template-columns: minmax(0, 1fr); gap: .35rem; } }
+  .rung .tag {
+    font-family: var(--mono); font-size: .72rem; font-weight: 600;
+    letter-spacing: .08em; text-transform: uppercase;
+  }
+  .rung p { font-size: .93rem; }
+  .rung.r-confirmed { background: var(--confirmed-bg); border-color: var(--confirmed); }
+  .rung.r-confirmed .tag { color: var(--confirmed); }
+  .rung.r-likely    { background: var(--likely-bg);    border-color: var(--likely); }
+  .rung.r-likely .tag { color: var(--likely); }
+  .rung.r-uncertain { background: var(--uncertain-bg); border-color: var(--uncertain); }
+  .rung.r-uncertain .tag { color: var(--uncertain); }
+  .rung.r-blocked   { background: var(--blocked-bg);   border-color: var(--blocked); }
+  .rung.r-blocked .tag { color: var(--blocked); }
+  .rung.r-failed    { background: var(--failed-bg);    border-color: var(--failed); }
+  .rung.r-failed .tag { color: var(--failed); }
+
+  /* ---- glossary ---- */
+  .glossary { display: flex; flex-direction: column; gap: 0; }
+  .term {
+    display: grid; grid-template-columns: 9rem minmax(0, 1fr); gap: 0 1.2rem;
+    padding-block: .95rem; border-bottom: 1px solid var(--rule);
+  }
+  .term:first-child { border-top: 1px solid var(--rule); }
+  @media (max-width: 34rem) { .term { grid-template-columns: minmax(0, 1fr); gap: .3rem; } }
+  .term dt {
+    font-family: var(--mono); font-size: .8rem; font-weight: 500;
+    color: var(--accent-ink); padding-top: .12rem;
+  }
+  .term dd { margin: 0; font-size: .96rem; color: var(--ink-soft); }
+  .term dd .plain { color: var(--ink); }
+
+  /* ---- fit table ---- */
+  .fit { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+  @media (max-width: 44rem) { .fit { grid-template-columns: minmax(0, 1fr); } }
+  .fit-card { border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; background: var(--surface); }
+  .fit-card > header {
+    padding: .7rem 1.1rem; font-family: var(--mono); font-size: .72rem;
+    letter-spacing: .12em; text-transform: uppercase; font-weight: 500;
+  }
+  .fit-card.good > header { background: var(--confirmed-bg); color: var(--confirmed); border-bottom: 1px solid var(--confirmed); }
+  .fit-card.bad  > header { background: var(--failed-bg);    color: var(--failed);    border-bottom: 1px solid var(--failed); }
+  .fit-card ul { padding: 1rem 1.1rem 1.15rem 2.1rem; }
+  .fit-card li { font-size: .94rem; }
+
+  /* ---- numbers ---- */
+  .figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: .8rem; }
+  .figure {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 6px; padding: .9rem 1rem;
+  }
+  .figure .v {
+    font-family: var(--display); font-size: 1.75rem; font-weight: 600;
+    font-variant-numeric: tabular-nums; letter-spacing: -.01em; display: block;
+  }
+  .figure .l {
+    font-family: var(--mono); font-size: .67rem; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--ink-faint); margin-top: .2rem; display: block;
+  }
+
+  /* ---- diagram ---- */
+  figure { margin: 0; }
+  figure svg { display: block; width: 100%; height: auto; }
+  .diagram {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 6px; padding: 1.4rem 1.2rem;
+    overflow-x: auto;
+  }
+  figcaption {
+    margin-top: .7rem; font-size: .85rem; color: var(--ink-faint);
+    font-family: var(--mono); letter-spacing: .01em;
+  }
+  .svg-label { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; }
+  .svg-text  { font-family: "IBM Plex Sans", sans-serif; font-size: 12.5px; }
+
+  details {
+    border: 1px solid var(--rule); border-radius: 6px;
+    background: var(--surface); padding: .3rem .3rem;
+  }
+  summary {
+    cursor: pointer; padding: .65rem .9rem; font-weight: 600;
+    font-size: .95rem; list-style-position: inside;
+  }
+  details[open] summary { border-bottom: 1px solid var(--rule); margin-bottom: .5rem; }
+  details .body { padding: .2rem .95rem .8rem; }
+  details .body > * + * { margin-top: .8rem; }
+
+  footer {
+    border-top: 1px solid var(--rule); margin-top: 2rem;
+    padding-block: 2.5rem 4rem; color: var(--ink-faint); font-size: .88rem;
+  }
+  footer .inner { max-width: 52rem; margin: 0 auto; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<header class="masthead">
+  <div class="wrap">
+    <div class="inner">
+      <span class="stamp">Plain-language guide</span>
+      <h1>Proof, not promises</h1>
+      <p class="lede">
+        An AI will tell you the job is done. It will sound certain. Sometimes it
+        is wrong. This is a system built on the opposite assumption — that
+        nobody's word counts as evidence, including the AI's.
+      </p>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ======================= THE PROBLEM ======================= -->
+  <section class="doc">
+    <div class="rail"><span>The problem</span></div>
+    <div class="col">
+      <h2>Why this exists</h2>
+      <p>
+        Imagine hiring an electrician. They spend the afternoon at your house,
+        pack up, and say <em>"all done, everything's working."</em> They sound
+        confident. They usually are right.
+      </p>
+      <p>
+        You still get it inspected. Not because you think they're lying, but
+        because "I did it" and "it has been checked" are different claims, and
+        only one of them keeps your house from burning down.
+      </p>
+      <p>
+        Today's AI is the confident electrician. Ask it to do a job and it will
+        report success in fluent, reassuring prose — whether or not it actually
+        succeeded. It has no way of knowing the difference, because to the AI,
+        producing a convincing report <em>is</em> the job.
+      </p>
+
+      <div class="callout">
+        <span class="label">The whole idea in one line</span>
+        <p>
+          <strong>This system is the inspector.</strong> It gives work to an AI,
+          then refuses to accept the answer until something independent has
+          checked it.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= THE CORE IDEA ======================= -->
+  <section class="doc">
+    <div class="rail"><span>The core idea</span></div>
+    <div class="col">
+      <h2>Who is allowed to decide what</h2>
+      <p>
+        Most AI tools put the AI in charge of everything — what to do, when it's
+        finished, whether to try again. That's the mistake. Here, the AI is a
+        very capable worker who is never also the supervisor.
+      </p>
+      <p>
+        Ordinary computer code — predictable, testable, boring in the best way —
+        holds the clipboard. The AI does the thinking. The split looks like this:
+      </p>
+
+      <div class="split">
+        <div class="panel is-model">
+          <h3>The AI decides</h3>
+          <ul>
+            <li>What the request actually means</li>
+            <li>How to break it into steps</li>
+            <li>How to do each step</li>
+            <li>Judgement calls where there's no right answer</li>
+          </ul>
+        </div>
+        <div class="panel is-code">
+          <h3>The code decides</h3>
+          <ul>
+            <li>What runs, and in what order</li>
+            <li>What the AI is allowed to touch</li>
+            <li>Whether the work passed</li>
+            <li>When to stop, retry, or ask you</li>
+            <li>How much it's allowed to cost</li>
+          </ul>
+        </div>
+      </div>
+
+      <p>
+        That division is why the system can make firm promises instead of hopeful
+        ones. A supervisor made of code doesn't get talked round.
+      </p>
+
+      <figure class="diagram">
+        <svg viewBox="0 0 620 190" role="img" aria-label="The AI proposes an action; the policy engine decides whether it is allowed; the tool performs it; a validator judges the result.">
+          <defs>
+            <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+              <path d="M0,0 L7,3.2 L0,6.4 Z" fill="currentColor"/>
+            </marker>
+          </defs>
+          <g color="var(--rule-strong)">
+            <line x1="140" y1="70" x2="176" y2="70" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar)"/>
+            <line x1="300" y1="70" x2="336" y2="70" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar)"/>
+            <line x1="452" y1="70" x2="488" y2="70" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar)"/>
+          </g>
+
+          <g>
+            <rect x="14" y="40" width="126" height="60" rx="5" fill="var(--likely-bg)" stroke="var(--likely)" stroke-width="1.2"/>
+            <text x="77" y="66" text-anchor="middle" class="svg-label" fill="var(--likely)">The AI</text>
+            <text x="77" y="85" text-anchor="middle" class="svg-text" fill="var(--ink)">asks</text>
+          </g>
+          <g>
+            <rect x="176" y="40" width="124" height="60" rx="5" fill="var(--surface-sunk)" stroke="var(--rule-strong)" stroke-width="1.2"/>
+            <text x="238" y="66" text-anchor="middle" class="svg-label" fill="var(--ink-faint)">Rules</text>
+            <text x="238" y="85" text-anchor="middle" class="svg-text" fill="var(--ink)">allow or refuse</text>
+          </g>
+          <g>
+            <rect x="336" y="40" width="116" height="60" rx="5" fill="var(--surface-sunk)" stroke="var(--rule-strong)" stroke-width="1.2"/>
+            <text x="394" y="66" text-anchor="middle" class="svg-label" fill="var(--ink-faint)">Tool</text>
+            <text x="394" y="85" text-anchor="middle" class="svg-text" fill="var(--ink)">performs it</text>
+          </g>
+          <g>
+            <rect x="488" y="40" width="118" height="60" rx="5" fill="var(--confirmed-bg)" stroke="var(--confirmed)" stroke-width="1.2"/>
+            <text x="547" y="66" text-anchor="middle" class="svg-label" fill="var(--confirmed)">Check</text>
+            <text x="547" y="85" text-anchor="middle" class="svg-text" fill="var(--ink)">judges it</text>
+          </g>
+
+          <text x="14" y="140" class="svg-text" fill="var(--ink-soft)">Four separate stages, four separate pieces of code.</text>
+          <text x="14" y="160" class="svg-text" fill="var(--ink-soft)">The AI's request is never the permission.</text>
+        </svg>
+        <figcaption>Reasoning, authorisation, execution, and judgement never sit in the same hands.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ======================= HOW A RUN WORKS ======================= -->
+  <section class="doc">
+    <div class="rail"><span>How a job runs</span></div>
+    <div class="col">
+      <h2>What happens when you ask for something</h2>
+      <p>
+        You give it a goal in plain English — not a recipe. You don't say
+        <em>how</em>. Working out the how is its job. Here's the whole sequence,
+        and it genuinely is a sequence, so the numbers mean something.
+      </p>
+
+      <div class="steps">
+        <div class="step">
+          <div class="n"></div>
+          <div>
+            <h3>It works out what you actually asked for</h3>
+            <p>
+              It separates what you stated from what it's guessing, and writes
+              both down separately so a guess can never quietly become a fact
+              later.
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="n"></div>
+          <div>
+            <h3>It sizes up the job</h3>
+            <p>
+              A simple question gets one worker and one check. A tangled request
+              gets a proper plan. It reads the <em>shape</em> of your request, not
+              the topic.
+            </p>
+            <p class="aside">
+              A one-line question genuinely does get handled in one step — it
+              won't invent committee meetings for "what time is it".
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="n"></div>
+          <div>
+            <h3>It writes a plan</h3>
+            <p>
+              A list of steps, which ones depend on which, and — crucially — how
+              each one will be checked. The plan is a proper structured document,
+              not a paragraph of intentions.
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="n"></div>
+          <div>
+            <h3>It checks the plan is possible before starting</h3>
+            <p>
+              If a step needs a tool that doesn't exist, you find out now, with a
+              clear reason — not three steps in with a baffling error.
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="n"></div>
+          <div>
+            <h3>It does the work</h3>
+            <p>
+              Independent steps run at the same time. Steps that touch the same
+              thing are made to queue, so two workers never trample each other.
+              Each worker gets only the tools its own step needs — and can't even
+              see the rest.
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="n"></div>
+          <div>
+            <h3>Every step gets checked</h3>
+            <p>
+              Not by the worker who did it. By something separate: running your
+              tests, matching a required format, confirming a file exists. If the
+              check fails, the step failed — no matter how confidently the worker
+              reported success.
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="n"></div>
+          <div>
+            <h3>When something breaks, it responds sensibly</h3>
+            <p>
+              A timeout gets retried. A bad result gets a different approach. A
+              refused permission gets escalated to you, never worked around. Every
+              route ends either in success or in asking a human — never in an
+              endless loop.
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="n"></div>
+          <div>
+            <h3>It reports honestly</h3>
+            <p>
+              Including admitting when it can't prove something. That last part is
+              the point of the whole exercise.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= CONFIDENCE ======================= -->
+  <section class="doc">
+    <div class="rail"><span>Reading the answer</span></div>
+    <div class="col">
+      <h2>Two words, not one</h2>
+      <p>
+        Every finished job reports <strong>what happened</strong> and
+        <strong>how much to believe it</strong>. Most people look only at the
+        first. The second is where the value is.
+      </p>
+
+      <div class="ladder">
+        <div class="rung r-confirmed">
+          <span class="tag">Confirmed</span>
+          <p>Something independent checked it and it passed. This is proof.</p>
+        </div>
+        <div class="rung r-likely">
+          <span class="tag">Likely</span>
+          <p>It passed, but judgement was involved. Probably right. Not proven.</p>
+        </div>
+        <div class="rung r-uncertain">
+          <span class="tag">Uncertain</span>
+          <p>
+            The work got done, but nothing could verify it. An honest shrug —
+            and far more useful than a false tick.
+          </p>
+        </div>
+        <div class="rung r-blocked">
+          <span class="tag">Blocked</span>
+          <p>It stopped and is waiting on something outside its control — usually you.</p>
+        </div>
+        <div class="rung r-failed">
+          <span class="tag">Failed</span>
+          <p>It did not achieve the goal, and it says so plainly.</p>
+        </div>
+      </div>
+
+      <div class="callout">
+        <span class="label">The bit people misread</span>
+        <p>
+          <strong>"Completed" plus "uncertain" is not a bug.</strong> It means the
+          work was done and the system could not prove it. Most AI tools would
+          have shown you a green tick there. This one tells you the truth, which
+          is less satisfying and much more useful.
+        </p>
+        <p>
+          To turn <span class="mono">uncertain</span> into
+          <span class="mono">confirmed</span>, give it a check it can actually
+          run — your test suite, a required format, a file that must exist.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= VOCABULARY ======================= -->
+  <section class="doc">
+    <div class="rail"><span>The words</span></div>
+    <div class="col">
+      <h2>Seven words worth knowing</h2>
+      <p>
+        The documentation uses these constantly. They're simpler than they sound.
+      </p>
+
+      <dl class="glossary">
+        <div class="term">
+          <dt>Objective</dt>
+          <dd><span class="plain">What you asked for.</span> One sentence of plain English. The only thing you're required to provide.</dd>
+        </div>
+        <div class="term">
+          <dt>Task</dt>
+          <dd><span class="plain">One step of the plan.</span> Written to stand alone, so whoever picks it up needs no other context.</dd>
+        </div>
+        <div class="term">
+          <dt>Agent</dt>
+          <dd><span class="plain">A worker.</span> Not a person and not a personality — a job description saying what it can do and what it's allowed to touch.</dd>
+        </div>
+        <div class="term">
+          <dt>Tool</dt>
+          <dd><span class="plain">An action it can take.</span> Read a file, run a command, call a website. Without tools it can only think and talk.</dd>
+        </div>
+        <div class="term">
+          <dt>Capability</dt>
+          <dd><span class="plain">A kind of ability.</span> Tasks say what they need; workers say what they offer; the system matches them. Nobody is picked by name.</dd>
+        </div>
+        <div class="term">
+          <dt>Validator</dt>
+          <dd><span class="plain">The inspector.</span> The thing that decides whether a step really passed. The most valuable thing you can configure.</dd>
+        </div>
+        <div class="term">
+          <dt>Skill</dt>
+          <dd><span class="plain">House rules.</span> Written guidance handed to a worker — how you like things done. It advises; it never grants permission.</dd>
+        </div>
+      </dl>
+    </div>
+  </section>
+
+  <!-- ======================= USING IT ======================= -->
+  <section class="doc">
+    <div class="rail"><span>Using it</span></div>
+    <div class="col">
+      <h2>Getting it running</h2>
+      <p>
+        Four things, in order. The second is the one people skip and then wonder
+        why nothing works.
+      </p>
+
+      <h3>1 &middot; Install it</h3>
+<pre><span class="c"># from the project folder</span>
+pip install -e ".[all]"
+orchestrator init .</pre>
+
+      <h3>2 &middot; Give it a brain</h3>
+      <p>
+        It can plan without an AI model connected, but it cannot <em>do</em>
+        anything. It won't pretend otherwise — it stops and asks you. Point it at
+        a model in <code>.orchestrator/config.yaml</code>. Local models are free
+        and private; hosted ones are sharper.
+      </p>
+<pre><span class="k">models:</span>
+  <span class="k">providers:</span>
+    - <span class="k">type:</span> ollama          <span class="c"># runs on your machine, no key</span>
+      <span class="k">base_url:</span> http://localhost:11434</pre>
+      <p>
+        Then confirm it's actually reachable, rather than assuming:
+      </p>
+<pre>orchestrator validate   <span class="c"># is the setup sane?</span>
+orchestrator health     <span class="c"># is the model actually answering?</span></pre>
+
+      <h3>3 &middot; Ask for something</h3>
+<pre>orchestrator run "Compare the three files in ./notes
+                  and list where they disagree."</pre>
+      <p>
+        Say what you want, not how to get it. If you want a particular shape of
+        work, spelling out the parts as a list nudges it toward a real plan.
+      </p>
+
+      <h3>4 &middot; Read what it did</h3>
+<pre>orchestrator inspect &lt;id&gt;   <span class="c"># the plan, and what passed</span>
+orchestrator audit   &lt;id&gt;   <span class="c"># every decision, in order</span></pre>
+      <p>
+        <span class="mono">audit</span> is the one to open when the result
+        surprises you. Every choice the system made is in there, in sequence,
+        with its reason — including the ones that led somewhere you didn't expect.
+      </p>
+
+      <div class="callout">
+        <span class="label">Before your first real job</span>
+        <p>
+          Set a budget. It's counted <em>before</em> the spend, not discovered
+          after, so it can't run away with your money or your afternoon.
+        </p>
+<pre><span class="k">limits:</span>
+  <span class="k">max_model_calls:</span> 50
+  <span class="k">max_wall_seconds:</span> 600
+  <span class="k">max_cost:</span> 2.00</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= FIT ======================= -->
+  <section class="doc">
+    <div class="rail"><span>Is it for you</span></div>
+    <div class="col">
+      <h2>When to reach for it — and when not to</h2>
+      <p>
+        It's deliberately not built for one industry. What decides whether it
+        suits your job isn't the subject, it's the shape.
+      </p>
+
+      <div class="fit">
+        <div class="fit-card good">
+          <header>Good fit</header>
+          <ul>
+            <li>Work that breaks into separate pieces</li>
+            <li>Anything with a real test at the end</li>
+            <li>Jobs where a wrong answer is expensive</li>
+            <li>Batches of many similar items</li>
+            <li>Long jobs you need to pause and resume</li>
+            <li>Anything needing an audit trail or sign-off</li>
+          </ul>
+        </div>
+        <div class="fit-card bad">
+          <header>Poor fit</header>
+          <ul>
+            <li>Back-and-forth conversation</li>
+            <li>One quick question — just ask a model</li>
+            <li>Purely creative work with no way to check it</li>
+            <li>Anything needing an answer in seconds</li>
+            <li>Thousands of steps at once</li>
+            <li>Pipelines you've already automated properly</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout">
+        <span class="label">The honest version</span>
+        <p>
+          This is a <strong>supervised</strong> way to run AI work, not a faster
+          one. If you don't need the record, the sign-off gates, the spending
+          ceiling, and the refusal to overstate what was proven — a plain AI
+          assistant is less machinery for the same output. The governance
+          <em>is</em> the product.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= REALITY ======================= -->
+  <section class="doc">
+    <div class="rail"><span>Reality check</span></div>
+    <div class="col">
+      <h2>What it actually costs you</h2>
+      <p>
+        Measured on a normal desktop, not estimated. These are the numbers that
+        decide whether this fits your working day.
+      </p>
+
+      <div class="figures">
+        <div class="figure"><span class="v">40–120s</span><span class="l">per thinking step</span></div>
+        <div class="figure"><span class="v">3–8 min</span><span class="l">a small job, end to end</span></div>
+        <div class="figure"><span class="v">£0</span><span class="l">running locally</span></div>
+        <div class="figure"><span class="v">240</span><span class="l">automated tests passing</span></div>
+      </div>
+
+      <p>
+        It is a <strong>batch</strong> tool. You set it going and come back. That
+        is not a flaw to be optimised away; it's what checking things properly
+        costs.
+      </p>
+
+      <details>
+        <summary>What building it taught us about trusting AI</summary>
+        <div class="body">
+          <p>
+            The system worked perfectly against a fake, predictable model.
+            Pointing it at real ones broke it repeatedly — and every break was
+            instructive.
+          </p>
+          <p>
+            Asked to read a file, one model <strong>invented the contents</strong>
+            rather than admit it had no way to open one. The tools existed; the
+            planner had no way to request them. It filled the gap with fluent,
+            confident, entirely fictional text.
+          </p>
+          <p>
+            Another was told its work would be checked against a required format —
+            but was never shown the format. It failed a test it had no way to
+            read. A check the worker can't see is a trap, not a check.
+          </p>
+          <p>
+            A third spent its entire thinking budget thinking, produced nothing at
+            all, and the system reported that empty silence as a successful answer.
+          </p>
+          <p>
+            None of these appeared in hundreds of automated tests. All appeared
+            within minutes of using a real model on a real file. Which is,
+            fittingly, the entire argument for building the thing this way.
+          </p>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- ======================= CLOSE ======================= -->
+  <section class="doc">
+    <div class="rail"><span>In short</span></div>
+    <div class="col">
+      <h2>The one thing to remember</h2>
+      <p class="lede">
+        Anyone can say the work is finished. This is a system that goes and
+        looks — and that tells you plainly when it couldn't.
+      </p>
+      <p>
+        Everything else — the plans, the workers, the permissions, the budgets,
+        the audit trail — exists to make that one sentence true.
+      </p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="inner">
+      Universal AI Orchestration Platform &middot; plain-language guide.
+      For the technical detail see <span class="mono">ARCHITECTURE.md</span>,
+      <span class="mono">ORCHESTRATION_GUIDE.md</span>, and the
+      <span class="mono">docs/</span> folder.
+    </div>
+  </div>
+</footer>

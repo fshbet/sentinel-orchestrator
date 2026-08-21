@@ -1,0 +1,57 @@
+# ---------------------------------------------------------------------------
+# Local state and secrets. Never commit these.
+# ---------------------------------------------------------------------------
+#
+# The whole .orchestrator/ directory is local state by convention: it holds
+# state.db, which carries every objective, result, and audit trail this
+# machine has produced. An example configuration lives in
+# examples/config.development.yaml instead, so nothing here needs tracking.
+.orchestrator/
+
+.env
+.env.*
+*.key
+*.pem
+secrets.*
+*.keys.json
+
+# Backups and databases anywhere in the tree.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.bak
+
+# ---------------------------------------------------------------------------
+# Build and tool output
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Evaluation and scan artefacts
+evaluation-report.json
+evaluation-report.md
+sbom.json
+image-digest.txt
+
+# Deployment runtime output
+deployment/backups/
+deployment/caddy-data/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

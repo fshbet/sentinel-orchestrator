@@ -1,0 +1,33 @@
+# Example D from the specification: decompose, work in parallel, merge,
+# validate, review. The iterate step of the diagram is the platform's own
+# evaluator-optimizer loop, which is why it is not a task here.
+id: generic.complex_project
+version: 1.0.0
+description: Decompose into independent workstreams, merge, then verify the whole.
+pattern: orchestrator_worker
+steps:
+  - name: decompose
+    objective: >
+      Break the objective into independent workstreams. For each, state what it
+      must return and how it will be known to be complete. Do not create a
+      workstream that only exists to coordinate the others.
+    expected_outputs: [workstreams]
+    validations: [{validator: non_empty, mandatory: true}]
+  - name: workstream_one
+    objective: Carry out the first workstream and return exactly what it promised.
+    validations: [{validator: non_empty, mandatory: true}]
+  - name: workstream_two
+    objective: Carry out the second workstream and return exactly what it promised.
+    validations: [{validator: non_empty, mandatory: true}]
+  - name: workstream_three
+    objective: Carry out the third workstream and return exactly what it promised.
+    validations: [{validator: non_empty, mandatory: true}]
+options:
+  synthesis:
+    name: merge_and_verify
+    objective: >
+      Merge the workstream results into a single coherent answer. Where they
+      conflict, say so rather than choosing silently. Then check the merged
+      result against the original objective and report what remains unverified.
+    expected_outputs: [merged_result, verification]
+    validations: [{validator: non_empty, mandatory: true}]

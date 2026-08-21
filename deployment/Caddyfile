@@ -1,0 +1,81 @@
+# TLS termination and forwarding. **This proxy does NOT authenticate users.**
+#
+# Option A of the two deployment modes: bearer tokens are the only identity
+# mechanism, enforced by the orchestrator itself against shared PostgreSQL
+# token state. Caddy terminates TLS, strips client-supplied identity headers,
+# and forwards. It does not check who anybody is.
+#
+# If you put an OIDC-aware proxy in front of this one, note that the
+# orchestrator does not consume forwarded identity headers — that code exists
+# but is not wired into the middleware, and `api.proxy_identity.enabled: true`
+# is rejected by configuration validation rather than silently doing nothing.
+#
+# The orchestrator containers are on an internal-only Docker network and
+# publish no ports. This is the only route in.
+
+{
+	# A local CA for the smoke test. In a real deployment remove this block
+	# and let Caddy obtain certificates from Let's Encrypt, or point `tls` at
+	# your own certificate and key.
+	local_certs
+	admin off
+}
+
+# `orchestrator-caddy` is the container name, so the smoke test can reach
+# this over the Docker edge network. A hostname absent from this list gets
+# no site block at all and the connection is simply dropped — which looks
+# identical to the proxy being down.
+#
+# Replace this whole list with your real hostname in production.
+orchestrator.localhost, localhost, 127.0.0.1, orchestrator-caddy {
+	tls internal
+
+	encode gzip
+
+	# Identity headers are stripped from every inbound request before
+	# forwarding. Nothing downstream consumes them today, but a header a
+	# client can set and a proxy passes through is how "trusted header"
+	# authentication gets broken later, by someone who assumes the proxy
+	# already filtered it.
+	request_header -X-Forwarded-User
+	request_header -X-Forwarded-Groups
+	request_header -X-Forwarded-Tenant
+	request_header -X-Auth-Request-User
+	request_header -X-Auth-Request-Email
+	request_header -X-Remote-User
+
+	# Metrics: reachable only from the monitoring range, and still requiring
+	# the Prometheus bearer token at the orchestrator. Two independent
+	# conditions, so a leaked scrape token is not by itself enough.
+	@metrics path /metrics
+	handle @metrics {
+		@offnet not remote_ip 172.28.0.0/16 10.0.0.0/8
+		respond @offnet "metrics are restricted to the monitoring network" 403
+		reverse_proxy orchestrator-1:8080 orchestrator-2:8080
+	}
+
+	# Probes. No credential, nothing sensitive in the response.
+	@probes path /live /ready
+	handle @probes {
+		reverse_proxy orchestrator-1:8080 orchestrator-2:8080
+	}
+
+	handle {
+		reverse_proxy orchestrator-1:8080 orchestrator-2:8080 {
+			lb_policy round_robin
+			health_uri /live
+			health_interval 10s
+
+			# Set by Caddy, not passed through from the client. The
+			# orchestrator believes X-Forwarded-For only from the address
+			# listed in api.trusted_proxies.
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Request-ID {http.request.uuid}
+		}
+	}
+
+	log {
+		output file /data/access.log
+		format json
+	}
+}

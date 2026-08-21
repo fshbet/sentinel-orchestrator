@@ -1,0 +1,18 @@
+# Generate, judge, regenerate. The loop is bounded by max_iterations.
+id: generic.evaluator_optimizer
+version: 1.0.0
+description: Produce work, judge it independently, and revise a bounded number of times.
+pattern: evaluator_optimizer
+steps:
+  - name: generate
+    objective: Produce the work the objective calls for.
+    validations: [{validator: non_empty, mandatory: true}]
+  - name: evaluate
+    objective: >
+      Judge the produced work against the objective and the success criteria.
+      Reply with JSON of the form {"passed": bool, "reason": "...", "missing": [...]}.
+      Do not revise the work yourself.
+    expected_outputs: [verdict]
+    validations: [{validator: non_empty, mandatory: true}]
+options:
+  max_iterations: 3

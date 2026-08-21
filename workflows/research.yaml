@@ -1,0 +1,30 @@
+# Example A from the specification: research, evidence, evaluation, synthesis.
+id: generic.research
+version: 1.0.0
+description: Gather evidence, evaluate it, synthesise a conclusion, then review.
+pattern: sequential
+steps:
+  - name: scope
+    objective: >
+      State the questions that must be answered and what kind of evidence would
+      settle each one.
+    expected_outputs: [questions, evidence_criteria]
+    validations: [{validator: non_empty, mandatory: true}]
+  - name: gather
+    objective: >
+      Collect evidence for each question using the tools available. Record where
+      each piece of evidence came from. Mark anything you could not retrieve.
+    expected_outputs: [evidence]
+    validations: [{validator: non_empty, mandatory: true}]
+  - name: evaluate
+    objective: >
+      Assess the strength of each piece of evidence. Separate what is
+      established from what is inferred, assumed, or unverified.
+    expected_outputs: [assessment]
+    validations: [{validator: non_empty, mandatory: true}]
+  - name: synthesise
+    objective: >
+      Answer the original questions from the evaluated evidence, stating your
+      confidence in each answer and what would change it.
+    expected_outputs: [conclusion]
+    validations: [{validator: non_empty, mandatory: true}]

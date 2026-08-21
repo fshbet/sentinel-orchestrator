@@ -1,0 +1,15 @@
+.git
+.gitignore
+.pytest_cache
+__pycache__
+*.pyc
+.orchestrator/state.db
+.orchestrator/.keys.json
+.env
+*.key
+secrets.*
+tests/
+docs/
+examples/
+*.md
+!README.md

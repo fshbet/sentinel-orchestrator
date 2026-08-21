@@ -1,0 +1,31 @@
+# Generic sequential pattern. Domain-neutral by design: the steps describe
+# shape, not subject matter.
+id: generic.sequential
+version: 1.0.0
+description: Plan, do the work, check it. The smallest useful multi-step shape.
+pattern: sequential
+steps:
+  - name: plan
+    objective: >
+      Establish what specifically needs to be produced to satisfy the objective,
+      and what would count as evidence that it has been.
+    expected_outputs: [approach, evidence_plan]
+    validations:
+      - validator: non_empty
+        mandatory: true
+  - name: execute
+    objective: >
+      Carry out the approach established in the previous step. Use only the
+      tools you were granted, and report what you could not establish.
+    expected_outputs: [result]
+    validations:
+      - validator: non_empty
+        mandatory: true
+  - name: verify
+    objective: >
+      Check the result against the objective and the success criteria. State
+      precisely what is verified and what remains uncertain.
+    expected_outputs: [verification]
+    validations:
+      - validator: non_empty
+        mandatory: true

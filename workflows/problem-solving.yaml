@@ -1,0 +1,30 @@
+# Example C from the specification: diagnose, hypothesise, test, correct, verify.
+id: generic.problem_solving
+version: 1.0.0
+description: Diagnose a problem, test a hypothesis, correct it, and verify the fix.
+pattern: sequential
+steps:
+  - name: diagnose
+    objective: >
+      Establish what is actually happening, distinguishing observations from
+      interpretation.
+    expected_outputs: [observations]
+    validations: [{validator: non_empty, mandatory: true}]
+  - name: hypothesise
+    objective: >
+      Propose the most likely cause and state what observation would disprove it.
+    expected_outputs: [hypothesis, disconfirming_test]
+    validations: [{validator: non_empty, mandatory: true}]
+  - name: test
+    objective: Run the disconfirming test and report what actually happened.
+    expected_outputs: [experiment_result]
+    validations: [{validator: non_empty, mandatory: true}]
+  - name: correct
+    objective: Apply the correction the evidence supports.
+    expected_outputs: [correction]
+    validations: [{validator: non_empty, mandatory: true}]
+  - name: verify
+    objective: >
+      Confirm the problem is resolved with an observation, not with an assertion.
+    expected_outputs: [verification]
+    validations: [{validator: non_empty, mandatory: true}]

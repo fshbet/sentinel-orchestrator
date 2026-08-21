@@ -1,0 +1,232 @@
+# Example development configuration.
+#
+# Copy to .orchestrator/config.yaml and edit. The model lineup below is a
+# real, working one — capabilities were measured rather than assumed — so
+# it doubles as a reference for how to declare providers.
+#
+# Contains no credentials, by construction: `api_key_env` holds the NAME of
+# an environment variable. See deployment/config.production.yaml for the
+# hardened multi-replica configuration.
+#
+# Universal AI Orchestration Platform — project configuration
+#
+# Providers: Ollama (local), OpenRouter and NVIDIA (both OpenAI-compatible).
+#
+# SECRETS: `api_key_env` is the NAME OF AN ENVIRONMENT VARIABLE, not a place to
+# put a key. Keys in this file would sit in plaintext in the repository. Set
+# them in the environment instead:
+#
+#   setx OPENROUTER_API_KEY "sk-or-v1-..."      (Windows, persistent)
+#   setx NVIDIA_API_KEY     "nvapi-..."
+#
+# then open a new terminal. On Linux/macOS use export in your shell profile.
+version: 1
+
+# Deployment profile. Decides the defaults for anything left unset below:
+# policy effect, tool grants, HTTP egress, API authentication.
+#
+#   development     this machine, one user, permissive. What this config is.
+#   internal-pilot  real users, deny-by-default, internal networks reachable.
+#   production      deny-by-default, no private networks, no plain HTTP.
+#
+# Omitting this line means `production`, deliberately: an operator who has not
+# decided should get the strict posture, not the loose one. This is a laptop
+# talking to a local Ollama, so it says so.
+#
+# See docs/configuration.md for the full posture of each profile.
+profile: development
+
+workspace: "."
+
+logging:
+  level: warning
+  json: true
+
+storage:
+  backend: sqlite
+  path: .orchestrator/state.db
+
+# Local models are slow: measured 40–120s per planning call on this machine.
+# A simple run is goal analysis + planning + at least one worker call, so budget
+# minutes, not seconds. These ceilings are enforced by counting, before the spend.
+limits:
+  max_wall_seconds: 3600
+  max_model_calls: 60
+  max_tool_calls: 200
+  # Ollama serialises requests by default; running many at once thrashes VRAM
+  # rather than going faster. Raise only if OLLAMA_NUM_PARALLEL is set.
+  max_parallel_tasks: 2
+  max_task_attempts: 3
+  max_replans: 2
+  max_optimizer_iterations: 2
+  max_nesting_depth: 2
+
+policy:
+  # Anything the risk engine rates at or above this needs a human.
+  approval_threshold: high
+  rules: []
+
+models:
+  providers:
+    # ----------------------------------------------------------------------
+    # Ollama — local, no key, currently active.
+    #
+    # Capabilities here are measured, not assumed. Each model below was tested
+    # against the planner's real JSON schema. Two installed models are
+    # deliberately absent:
+    #   qwen3:14b     — timed out at 180s on a structured-output call
+    #   deepseek-r1:* — emits <think> blocks that break strict JSON parsing
+    # Declaring a capability a model lacks makes tasks fail and burns recovery
+    # attempts, so under-declare rather than over-declare.
+    # ----------------------------------------------------------------------
+    - type: ollama
+      base_url: http://localhost:11434
+      timeout: 600
+      models:
+        # Fastest reliable planner on this machine (~42s). Preferred by default:
+        # lower priority wins among models that satisfy the requirements.
+        - id: ollama/llama3.1-8b
+          model: llama3.1:8b
+          capabilities: [text_generation, tool_calling, structured_output]
+          context_window: 131072
+          max_output_tokens: 4096
+          priority: 30
+
+        # Stronger instruction-following, slower. Fallback for planning, and the
+        # one to prefer when a task needs more care than speed.
+        - id: ollama/qwen2.5-14b
+          model: qwen2.5:14b-instruct-q4_K_M
+          capabilities: [text_generation, tool_calling, structured_output, long_context]
+          context_window: 32768
+          max_output_tokens: 4096
+          priority: 40
+
+        # Third option, so a single model failing does not strand a run.
+        - id: ollama/qwen3-8b
+          model: qwen3:8b
+          capabilities: [text_generation, structured_output]
+          context_window: 32768
+          max_output_tokens: 4096
+          priority: 50
+
+        # Large local model for work that genuinely needs it. Not given
+        # structured_output: it is too slow to sit in the planning path.
+        - id: ollama/qwen3-coder-30b
+          model: qwen3-coder:30b
+          capabilities: [text_generation, tool_calling, long_context]
+          context_window: 65536
+          max_output_tokens: 8192
+          priority: 60
+
+    # ----------------------------------------------------------------------
+    # OpenRouter — free tier. Rate-limited: expect occasional 429s, which the
+    # router classifies as transient and routes around.
+    # ----------------------------------------------------------------------
+    - type: openai_compatible
+      name: openrouter
+      base_url: https://openrouter.ai/api/v1
+      api_key_env: OPENROUTER_API_KEY
+      timeout: 240
+      headers:
+        HTTP-Referer: https://localhost
+        X-Title: universal-orchestrator
+      models:
+        # Verified against the real planner schema: 4 tasks, 3 tool requests,
+        # ~71s. Free-tier ids carry a ":free" suffix and change over time;
+        # `openrouter.ai/models` lists what is currently free.
+        #
+        # max_output_tokens is deliberately large. Reasoning tokens count
+        # against it, and a reasoning model given 1500 spends the lot thinking
+        # and returns nothing at all.
+        - id: openrouter/gpt-oss-20b
+          model: openai/gpt-oss-20b:free
+          capabilities: [text_generation, tool_calling, structured_output, long_context]
+          context_window: 131072
+          max_output_tokens: 8000
+          cost_per_1k_input: 0.0
+          cost_per_1k_output: 0.0
+          priority: 20
+
+        # Also free and capable, but rate-limited hard enough to 429 during
+        # testing. Kept as a fallback: a 429 is classified transient, so the
+        # router moves on rather than failing the run.
+        - id: openrouter/glm-5.2
+          model: z-ai/glm-5.2:free
+          capabilities: [text_generation, tool_calling, structured_output, long_context]
+          context_window: 256000
+          max_output_tokens: 8000
+          cost_per_1k_input: 0.0
+          cost_per_1k_output: 0.0
+          priority: 45
+
+    # ----------------------------------------------------------------------
+    # NVIDIA NIM — free developer tier, credit-limited. Slower than local
+    # (~80s) but far more capable, which is the right trade for planning.
+    # ----------------------------------------------------------------------
+    - type: openai_compatible
+      name: nvidia
+      base_url: https://integrate.api.nvidia.com/v1
+      api_key_env: NVIDIA_API_KEY
+      timeout: 240
+      models:
+        # The best planner available here: verified 3 tasks with 2 tool
+        # requests in ~80s. Preferred, because plan quality decides everything
+        # downstream and a bad plan cannot be recovered from cheaply.
+        - id: nvidia/nemotron-3-super-120b
+          model: nvidia/nemotron-3-super-120b-a12b
+          capabilities: [text_generation, tool_calling, structured_output, long_context]
+          context_window: 131072
+          max_output_tokens: 8000
+          priority: 10
+
+        # Available and authenticated, but timed out at 230s on the planner
+        # prompt during testing. Left registered at a low preference so the
+        # router can reach it if nothing better is free, and so a future
+        # improvement in queue times needs no config change.
+        - id: nvidia/llama-3.3-70b
+          model: meta/llama-3.3-70b-instruct
+          capabilities: [text_generation, tool_calling, long_context]
+          context_window: 131072
+          max_output_tokens: 8000
+          priority: 70
+
+tools:
+  # Notes and artifacts. Safe, so on by default.
+  bookkeeping:
+    enabled: true
+  # Read-only filesystem access, confined to the workspace. Writing is off
+  # until you want it.
+  filesystem:
+    enabled: true
+    root: "."
+    allow_write: false
+  # Off by default. Enabling requires naming the executables; there is no
+  # "run anything" mode.
+  process:
+    enabled: false
+    allowed_commands: []
+  http:
+    enabled: false
+    allowed_hosts: []
+
+mcp:
+  servers: {}
+  policies: []
+
+skills:
+  directories: [".orchestrator/skills"]
+  definitions: []
+
+capabilities: []
+
+agents:
+  directories: [".orchestrator/agents"]
+  definitions: []
+
+workflows:
+  directories: []
+
+recovery:
+  allow_replan: true
+  allow_dynamic_agents: true
+  allow_human_escalation: true

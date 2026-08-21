@@ -1,0 +1,227 @@
+# Production configuration for the Compose stack.
+#
+# This file is version-controlled and contains no credentials. Every secret is
+# named, not stored: `dsn_env` and `token_env` hold the *names* of environment
+# variables, which the container receives from the host or a secret manager.
+#
+# Mounted read-only at /etc/orchestrator/config.yaml and selected with
+# ORCHESTRATOR_CONFIG. `orchestrator validate -c deployment/config.production.yaml`
+# checks it without starting anything.
+
+version: 1
+
+# Deny by default. Every tool, host, and method below is granted explicitly.
+profile: production
+
+# The container's root filesystem is read-only and there is no writable
+# application directory, so the workspace is an explicit tmpfs mount.
+workspace: /tmp/workspace
+
+logging:
+  level: warning
+  json: true
+
+# --------------------------------------------------------------------------
+# State
+# --------------------------------------------------------------------------
+#
+# PostgreSQL, because this stack runs more than one replica. SQLite is
+# single-node: two processes against one file corrupt state.
+#
+# `apply_migrations: false` — the one-shot `migrate` service applies them
+# before any replica starts. Letting replicas migrate on boot means several
+# processes racing the same DDL; the advisory lock makes that safe but not
+# observable, and a failed migration should stop the deployment rather than
+# leave one replica behind.
+storage:
+  backend: postgres
+  postgres:
+    dsn_env: ORCHESTRATOR_POSTGRES_DSN
+    min_connections: 2
+    max_connections: 20
+    command_timeout: 30
+    apply_migrations: false
+
+# --------------------------------------------------------------------------
+# Policy
+# --------------------------------------------------------------------------
+#
+# Under `production` the default effect is deny and explicit grants are
+# required, so a tool absent from this list cannot run. The rules below are a
+# starting point: narrow them to what your objectives actually need.
+policy:
+  approval_threshold: medium
+  deny_threshold: critical
+  rules:
+    - kind: tool
+      subject: orchestrator.record_note
+      effect: allow
+      reason: "bookkeeping; touches nothing outside the orchestrator"
+    - kind: tool
+      subject: orchestrator.emit_artifact
+      effect: allow
+      reason: "records results"
+    # Process execution is not granted. Uncomment only with an exact
+    # executable allowlist under tools.process.
+    - kind: tool
+      subject: process.run
+      effect: deny
+      reason: "no process execution in this deployment"
+
+# --------------------------------------------------------------------------
+# Tools
+# --------------------------------------------------------------------------
+tools:
+  bookkeeping:
+    enabled: true
+
+  # Read-only, and confined to the tmpfs workspace. The container root is
+  # read-only, so there is nowhere else to write in any case.
+  filesystem:
+    enabled: true
+    root: /tmp/workspace
+    allow_write: false
+
+  # Privileged. Off.
+  process:
+    enabled: false
+
+  # Outbound HTTP. `allowed_hosts` is mandatory — an empty list denies
+  # everything rather than permitting everything. All egress additionally
+  # passes through the Squid proxy, which re-checks the destination at
+  # connect time and so closes the DNS-rebinding window this process cannot.
+  http:
+    enabled: true
+    allowed_hosts:
+      - api.example.com
+    allowed_methods: [GET, HEAD]
+    allow_http: false
+    allow_private_networks: false
+    allow_loopback: false
+    allow_link_local: false
+    max_redirects: 3
+    max_request_bytes: 1048576
+    max_response_bytes: 5242880
+    connect_timeout: 10
+    timeout: 30
+    total_timeout: 60
+
+# --------------------------------------------------------------------------
+# Data classification and model egress
+# --------------------------------------------------------------------------
+#
+# A provider with no `data_policy` is treated as unapproved, not as approved
+# for public data. Approving an external provider is a legal and vendor-review
+# decision; this enforces the answer rather than supplying it.
+data:
+  default_classification: confidential
+  enforce_egress_policy: true
+
+models:
+  providers:
+    - type: ollama
+      name: ollama
+      base_url: http://ollama:11434
+      # Inferred `local`, stated anyway so the posture is readable here.
+      data_policy:
+        disposition: local
+        max_classification: restricted
+      models:
+        - id: ollama/llama3.1-8b
+          model: llama3.1:8b
+          capabilities: [text_generation, tool_calling, structured_output]
+          context_window: 131072
+          max_output_tokens: 4096
+          priority: 30
+
+# --------------------------------------------------------------------------
+# API identity
+# --------------------------------------------------------------------------
+#
+# Tokens live in environment variables named here. `token_env` is a NAME.
+#
+# Token state lives in PostgreSQL, so revoking on one replica takes effect on
+# all of them immediately. Only digests are stored; the raw value is never
+# written to the database, the logs, or the audit trail.
+#
+# Legacy note: ORCHESTRATOR_API_TOKEN still grants full access if set. It is
+# registered in the shared store like any other token and **can** be revoked
+# by id at runtime — but the environment variable remains its source of truth,
+# so the next restart re-seeds it. Removing it for good means removing the
+# variable and redeploying. The principals below are the revocable ones.
+api:
+  tenancy: single
+
+  principals:
+    - id: ops-console
+      name: "Operations console"
+      token_env: ORCHESTRATOR_TOKEN_OPS
+      scopes: [executions.read, executions.write, approvals.respond, audit.read]
+      lifetime_days: 90
+
+    # Metrics scraping needs admin because /metrics is admin-gated. It is a
+    # separate credential from the one used for token administration so that
+    # a scrape config leaking does not also hand over token management.
+    - id: prometheus
+      name: "Metrics scrape"
+      token_env: ORCHESTRATOR_TOKEN_PROMETHEUS
+      scopes: [admin]
+      lifetime_days: 365
+
+    # Token administration: listing metadata and revoking. Short-lived and
+    # issued to a person, not to a service.
+    - id: token-admin
+      name: "Token administration"
+      token_env: ORCHESTRATOR_TOKEN_ADMIN
+      scopes: [admin]
+      lifetime_days: 30
+
+    - id: ci-status
+      name: "CI status checks"
+      token_env: ORCHESTRATOR_TOKEN_CI
+      scopes: [executions.read]
+      lifetime_days: 30
+
+  # Believed only from these peers. The Compose `internal` network is
+  # 172.28.0.0/16 (pinned in docker-compose.production.yml); Caddy sits at
+  # 172.28.0.10. Without this, any caller could set X-Forwarded-For and
+  # rewrite the client address in the audit trail.
+  trusted_proxies:
+    - 172.28.0.10
+
+  # Proxy identity is NOT enabled, and the code that would consume it is not
+  # wired into the middleware. Caddy in this stack terminates TLS and proxies;
+  # it does not authenticate users. Bearer tokens are the only identity
+  # mechanism. Enabling this is rejected by config validation rather than
+  # silently doing nothing. See docs/security.md.
+  proxy_identity:
+    enabled: false
+
+  # Shared rate limiting, counted in the same PostgreSQL every replica uses.
+  #
+  # `backend: postgres` rather than `memory`: the in-process limiter counts
+  # per replica, so two replicas permitted twice the configured rate and every
+  # deploy reset the counters. A limit a caller can double by being
+  # load-balanced is not a limit.
+  #
+  # Keyed on the authenticated principal, not the client address — many
+  # callers share an egress IP and one caller moves between them. Stricter
+  # per-category budgets (authentication failures, token administration,
+  # execution creation) are built in; see api/ratelimit.py.
+  rate_limit:
+    enabled: true
+    backend: postgres
+    requests: 120
+    window_seconds: 60
+
+limits:
+  max_wall_seconds: 1800
+  max_model_calls: 100
+  max_tool_calls: 300
+  max_parallel_tasks: 4
+
+plugins:
+  enabled: false
+
+workflows:
+  directories: []

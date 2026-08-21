@@ -1,0 +1,19 @@
+# Fan out into independent branches, then merge.
+id: generic.parallel
+version: 1.0.0
+description: Independent branches executed concurrently and then synthesised.
+pattern: parallel
+steps:
+  - name: branch_a
+    objective: Address the first independent part of the objective.
+    validations: [{validator: non_empty, mandatory: true}]
+  - name: branch_b
+    objective: Address the second independent part of the objective.
+    validations: [{validator: non_empty, mandatory: true}]
+options:
+  merge:
+    name: synthesise
+    objective: >
+      Combine the branch results into one coherent answer. Where branches
+      disagree, say so rather than picking silently.
+    validations: [{validator: non_empty, mandatory: true}]

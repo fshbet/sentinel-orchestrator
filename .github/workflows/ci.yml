@@ -1,0 +1,368 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The core targets 3.11+; the matrix is what that claim is checked
+        # against. Windows is here because that is where this is developed,
+        # and path handling is exactly where the two diverge.
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: pip install -e ".[api,yaml,http,dev]"
+      - name: Test
+        run: python -m pytest tests/ -q
+
+  core-has-no-dependencies:
+    # ADR-011: the orchestration core runs on the standard library alone.
+    # A claim like that decays silently unless something checks it, so this
+    # job installs nothing optional and imports the engine.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: "3.12"
+      - name: Install with no extras
+        run: pip install -e .
+      - name: Import the engine on a bare interpreter
+        run: |
+          python - <<'PY'
+          import orchestrator
+          from orchestrator.platform import Orchestrator
+          from orchestrator.core.state.sqlite_store import SQLiteStateStore
+          from orchestrator.llm.routing import ModelRouter
+          print("core imports with no third-party packages installed")
+          PY
+      - name: Confirm nothing third-party arrived
+        run: |
+          python - <<'PY'
+          import importlib.metadata as md
+          allowed = {"universal-orchestrator", "pip", "setuptools", "wheel"}
+          extra = sorted(
+              d.metadata["Name"] for d in md.distributions()
+              if d.metadata["Name"].lower() not in allowed
+          )
+          assert not extra, f"unexpected dependencies installed: {extra}"
+          print("no third-party dependencies")
+          PY
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[api,yaml,http,dev]"
+      - name: An unauthenticated network bind must be refused
+        run: |
+          python - <<'PY'
+          from orchestrator.api.security import SecurityConfig, InsecureBinding
+          for host in ("0.0.0.0", "10.0.0.5", "example.internal"):
+              try:
+                  SecurityConfig(host=host).verify_binding()
+              except InsecureBinding:
+                  continue
+              raise SystemExit(f"SECURITY REGRESSION: {host} bound with no token")
+          SecurityConfig(host="127.0.0.1").verify_binding()
+          print("insecure bindings are refused")
+          PY
+      - name: No credentials committed
+        run: |
+          # Shipped code and config are scanned strictly. tests/ is excluded
+          # because the redaction and adversarial suites must contain
+          # credential-shaped strings to test against — that is the point of
+          # them. The next step keeps those fixtures honestly fake.
+          if git grep -nIE '(sk-or-v1-|nvapi-|sk-ant-|sk-proj-|ghp_|xox[baprs]-|AKIA)[A-Za-z0-9_-]{12,}'                -- . ':!tests/' ':!*.lock'; then
+            echo "::error::a credential-shaped string is committed outside tests/"
+            exit 1
+          fi
+          echo "no credential patterns in shipped code or config"
+
+      - name: Test fixtures are obviously synthetic
+        run: |
+          # A real key that drifted into a test would be invisible to the step
+          # above. Every fixture must carry a marker naming it as fake.
+          markers='EXAMPLE|abcdefghij|should-never-be-visible|attackerwantsthis|stolenkey|QWERTYUIOP|1234567890|test|fake|dummy'
+          bad=0
+          while IFS= read -r hit; do
+            echo "$hit" | grep -qiE "$markers" || { echo "::error::fixture does not look synthetic: $hit"; bad=1; }
+          done < <(git grep -hoIE '(sk-or-v1-|nvapi-|sk-ant-|ghp_|AKIA)[A-Za-z0-9_-]{12,}' -- tests/ | sort -u)
+          [ "$bad" = "0" ] || exit 1
+          echo "all credential-shaped test fixtures are synthetic"
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - name: Build the image
+        run: docker build -t orchestrator:ci .
+      - name: It must refuse to serve 0.0.0.0 unauthenticated
+        run: |
+          if docker run --rm orchestrator:ci orchestrator serve --host 0.0.0.0 --port 8080; then
+            echo "::error::container served an unauthenticated network bind"
+            exit 1
+          fi
+          echo "container refused as expected"
+
+  lint-and-types:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[api,yaml,http,dev]" ruff mypy
+      - name: Lint
+        run: ruff check src/ tests/
+      - name: Format check
+        run: ruff format --check src/ tests/
+      - name: Type check (gating)
+        # Gates on typed-modules.txt: every security-critical module. No
+        # `|| true` — a step that cannot fail is a step that checks nothing.
+        run: |
+          mapfile -t MODULES < <(grep -v '^#' typed-modules.txt | grep -v '^$')
+          mypy "${MODULES[@]}"
+      - name: Type check (reported, not gating)
+        # The legacy remainder. Reported so the debt is visible and countable.
+        run: |
+          mypy src/orchestrator 2>&1 | tail -1 || true
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[api,yaml,http,postgres]" pip-audit
+      - name: Known vulnerabilities in declared dependencies
+        # A fresh venv, so this audits *this project's* dependency surface
+        # rather than everything else on the runner image. Auditing the
+        # ambient environment produces findings for packages the project
+        # does not use, which trains people to ignore the job.
+        run: pip-audit --strict --desc -r <(pip freeze | grep -viE '^(pip|pip-audit)')
+
+  static-security-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: "3.12"
+      - run: pip install bandit[toml]
+      - name: Bandit
+        # B101 (assert) is excluded in tests only; src is checked in full.
+        run: bandit -r src/orchestrator -ll -ii
+
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[api,yaml,http]" cyclonedx-bom
+      - name: Generate SBOM
+        run: cyclonedx-py environment -o sbom.json --output-format json
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+        with:
+          name: sbom
+          path: sbom.json
+
+  container-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - name: Build
+        run: docker build -t orchestrator:scan .
+      - name: Scan the image
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0  # v0.29.0
+        with:
+          image-ref: orchestrator:scan
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: No state database or credentials baked into the image
+        run: |
+          if docker run --rm --entrypoint sh orchestrator:scan -c              'ls /app/.orchestrator/state.db /app/.env /data/.orchestrator/state.db 2>/dev/null'; then
+            echo "::error::the image contains state or credentials"
+            exit 1
+          fi
+          echo "image carries no state or credentials"
+      - name: The console is actually present in the installed image
+        run: |
+          docker run --rm --entrypoint sh orchestrator:scan -c             'test -f /app/ui/console.html'             || { echo "::error::ui/console.html missing from the image"; exit 1; }
+          echo "console present"
+      - name: The image does not run as root
+        run: |
+          user=$(docker run --rm --entrypoint id orchestrator:scan -u)
+          if [ "$user" = "0" ]; then
+            echo "::error::container runs as root"
+            exit 1
+          fi
+          echo "runs as uid $user"
+
+  console-in-sync:
+    # ui/console.html is the editable copy; src/orchestrator/ui/console.html is
+    # what ships. Two copies drift, so this fails the build when they differ.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - name: The packaged console matches the source console
+        run: |
+          if ! diff -q ui/console.html src/orchestrator/ui/console.html; then
+            echo "::error::ui/console.html and src/orchestrator/ui/console.html differ."
+            echo "Run: cp ui/console.html src/orchestrator/ui/console.html"
+            exit 1
+          fi
+          echo "console copies are in sync"
+
+  postgres-integration:
+    # The multi-instance backend, against a real server. Skipped locally when
+    # ORCHESTRATOR_TEST_POSTGRES_DSN is unset; supplied here so the tests that
+    # matter for multi-instance deployment actually run somewhere.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:6efd0df010dc3cb40d5e33e3ef84acecc5e73161bd3df06029ee8698e5e12c60
+        env:
+          POSTGRES_USER: orchestrator
+          POSTGRES_PASSWORD: ci-only-not-a-real-secret
+          POSTGRES_DB: orchestrator_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[api,yaml,http,postgres,dev]"
+      - name: PostgreSQL backend and shared-token tests
+        env:
+          ORCHESTRATOR_TEST_POSTGRES_DSN: >-
+            postgresql://orchestrator:ci-only-not-a-real-secret@localhost:5432/orchestrator_test
+        run: |
+          python -m pytest tests/test_postgres_store.py \n                          tests/test_shared_tokens.py -q
+      - name: Nothing was skipped for want of a database
+        env:
+          ORCHESTRATOR_TEST_POSTGRES_DSN: >-
+            postgresql://orchestrator:ci-only-not-a-real-secret@localhost:5432/orchestrator_test
+        run: |
+          # A gated suite that silently skips in CI proves nothing.
+          python -m pytest tests/test_postgres_store.py \n                          tests/test_shared_tokens.py -q 2>&1 | tee out.txt
+          if grep -qE '[0-9]+ skipped' out.txt; then
+            echo "::error::PostgreSQL tests were skipped in CI"
+            exit 1
+          fi
+
+  evaluation:
+    # Deterministic regression evaluation. Security and policy cases gate the
+    # build; quality cases are reported and only gate against an explicit
+    # floor, because a moving quality score is information rather than a verdict.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[api,yaml,http,dev]"
+      - name: Security and policy cases must all pass
+        run: python -m orchestrator.cli.main evaluate --suite security
+      - name: Full suite with a quality floor
+        run: |
+          python -m orchestrator.cli.main evaluate             --report evaluation-report --min-quality 0.90
+      - name: The harness still detects regressions
+        # A suite that cannot fail is indistinguishable from one that runs
+        # nothing. This inverts an expectation and requires a non-zero exit.
+        run: |
+          python - <<'PY'
+          import sys
+          from orchestrator.evaluation import run_suite
+          from orchestrator.evaluation.cases import EvaluationCase, Severity, Suite
+
+          inverted = EvaluationCase(
+              id="ci-canary", version=1, suite=Suite.EGRESS,
+              severity=Severity.CRITICAL,
+              description="asserts an empty allowlist permits everything",
+              egress_url="https://anything.test/",
+              egress_policy={"allowed_hosts": []},
+              expect_egress_allowed=True,
+          )
+          report = run_suite(cases=[inverted])
+          if report.ok:
+              print("::error::the evaluation harness did not catch an inverted case")
+              sys.exit(1)
+          print("harness canary failed as required")
+          PY
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+        if: always()
+        with:
+          name: evaluation-report
+          path: |
+            evaluation-report.json
+            evaluation-report.md
+
+  release-provenance:
+    # Build metadata, an SBOM, and the image digest — the three things needed
+    # to answer "what exactly is running" after the fact.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[all]" cyclonedx-bom
+      - name: SBOM
+        run: cyclonedx-py environment -o sbom.json --output-format json
+      - name: Build with provenance labels
+        run: |
+          docker build             --label "org.opencontainers.image.revision=${GITHUB_SHA}"             --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"             --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"             -t orchestrator:${GITHUB_SHA} .
+      - name: Record the image digest
+        run: |
+          docker images --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}'             orchestrator:${GITHUB_SHA} | tee image-digest.txt
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+        with:
+          name: release-provenance
+          path: |
+            sbom.json
+            image-digest.txt
+
+  compose-smoke:
+    # The documented production deployment, actually run. Every assertion in
+    # smoke-test.sh failed at least once during development: the image had no
+    # CLI and no asyncpg, and the insecure-binding check could not see
+    # configured principals — so a correct config could not start. Unit tests
+    # saw none of that.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - name: Compose production smoke test
+        # 49 checks: two replicas on shared PostgreSQL, distributed token
+        # revocation (revoke on one, rejected by the other), distributed rate
+        # limiting, enforced egress through Squid, and the Caddy TLS boundary.
+        run: bash deployment/smoke-test.sh
+      - name: Collect logs on failure
+        if: failure()
+        run: docker compose -f deployment/docker-compose.production.yml logs || true
