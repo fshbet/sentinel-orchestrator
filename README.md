@@ -189,6 +189,7 @@ systems. Control operations stay behind `--allow-control`.
 
 | | |
 |---|---|
+| [docs/how-it-works.html](docs/how-it-works.html) | Plain-language guide. Start here if you are not going to read the code |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | The design, the invariants, the subsystem map |
 | [ORCHESTRATION_GUIDE.md](ORCHESTRATION_GUIDE.md) | How to actually drive it |
 | [MCP_GUIDE.md](MCP_GUIDE.md) | MCP in both directions |

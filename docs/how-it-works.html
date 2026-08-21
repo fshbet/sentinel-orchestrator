@@ -51,7 +51,7 @@
       --ink-soft:     #A5B4C2;
       --ink-faint:    #6F8091;
       --rule:         #26333F;
-      --rule-strong:  #38495798;
+      --rule-strong:  #384957;
 
       --accent:       #5BB8C2;
       --accent-soft:  #143236;
@@ -501,6 +501,60 @@
     </div>
   </section>
 
+  <!-- ======================= PERMISSIONS ======================= -->
+  <section class="doc">
+    <div class="rail"><span>The leash</span></div>
+    <div class="col">
+      <h2>What it is allowed to touch</h2>
+      <p>
+        "The code decides what the AI can touch" is the sort of line every
+        product says. Here is what it means concretely, because the detail is
+        the entire value.
+      </p>
+      <p>
+        <strong>Nothing is permitted unless you permitted it.</strong> Not
+        "nothing dangerous" &mdash; nothing. A worker that hasn't been granted
+        the ability to read files cannot read files, however reasonably it asks,
+        however it phrases the request, and whatever a web page it just read
+        tried to tell it to do. Its request is a suggestion, handed to a
+        separate piece of code that holds the actual keys.
+      </p>
+
+      <dl class="glossary">
+        <div class="term">
+          <dt>Files</dt>
+          <dd><span class="plain">One folder, and no way out of it.</span> Paths that climb out with <code>..</code> or slip out through a shortcut are refused &mdash; and the check runs on where the path really lands, not on how it looks.</dd>
+        </div>
+        <div class="term">
+          <dt>Websites</dt>
+          <dd><span class="plain">A list of addresses you wrote by hand.</span> Not "anything except known-bad sites"; an empty list means it reaches nothing at all. If a permitted site forwards it elsewhere, the new address is checked too, at every hop.</dd>
+        </div>
+        <div class="term">
+          <dt>Programs</dt>
+          <dd><span class="plain">Switched off entirely by default</span>, and once switched on, limited to exact programs you named. It doesn't get a general-purpose command line unless you deliberately override that, because handing something a command line is permission to run everything.</dd>
+        </div>
+        <div class="term">
+          <dt>Secrets</dt>
+          <dd><span class="plain">Removed before the AI sees them,</span> and removed again before anything is written down. Passwords and keys live in your machine's environment; the settings file only ever names them.</dd>
+        </div>
+        <div class="term">
+          <dt>Your say-so</dt>
+          <dd><span class="plain">Some steps stop and wait for a person.</span> The job doesn't guess, and doesn't time out into a decision &mdash; it waits, in the same durable record as the rest of the work, until somebody answers.</dd>
+        </div>
+      </dl>
+
+      <div class="callout">
+        <span class="label">The part that matters most</span>
+        <p>
+          Every refusal is <strong>written down with its reason</strong>. So
+          "did it try to do something it shouldn't have?" is a question with an
+          answer you can go and read &mdash; not a reassurance you have to take
+          on trust.
+        </p>
+      </div>
+    </div>
+  </section>
+
   <!-- ======================= HOW A RUN WORKS ======================= -->
   <section class="doc">
     <div class="rail"><span>How a job runs</span></div>
@@ -668,7 +722,7 @@
   <section class="doc">
     <div class="rail"><span>The words</span></div>
     <div class="col">
-      <h2>Seven words worth knowing</h2>
+      <h2>Nine words worth knowing</h2>
       <p>
         The documentation uses these constantly. They're simpler than they sound.
       </p>
@@ -697,6 +751,14 @@
         <div class="term">
           <dt>Validator</dt>
           <dd><span class="plain">The inspector.</span> The thing that decides whether a step really passed. The most valuable thing you can configure.</dd>
+        </div>
+        <div class="term">
+          <dt>Policy</dt>
+          <dd><span class="plain">The rules about what may happen.</span> Consulted before every action. It answers yes or no, and its no is final &mdash; nothing the AI writes can talk it round.</dd>
+        </div>
+        <div class="term">
+          <dt>Approval</dt>
+          <dd><span class="plain">A stop-and-ask.</span> For steps you'd rather a person signed off. The job waits instead of guessing.</dd>
         </div>
         <div class="term">
           <dt>Skill</dt>
@@ -769,6 +831,64 @@ orchestrator audit   &lt;id&gt;   <span class="c"># every decision, in order</sp
     </div>
   </section>
 
+  <!-- ======================= NOT JUST YOU ======================= -->
+  <section class="doc">
+    <div class="rail"><span>Not just you</span></div>
+    <div class="col">
+      <h2>When other people start using it</h2>
+      <p>
+        Running something on your own laptop and running it for other people are
+        different jobs. This treats them as different jobs, rather than trusting
+        you to remember to tighten everything afterwards.
+      </p>
+
+      <div class="callout">
+        <span class="label">The one setting to understand</span>
+        <p>
+          A line called <code>profile</code> says who a copy is for:
+          <code>development</code>, <code>internal-pilot</code>, or
+          <code>production</code>. <strong>Leaving it out means
+          production</strong> &mdash; the strictest of the three, not the
+          friendliest.
+        </p>
+        <p>
+          That is deliberate, and it is the reverse of the usual arrangement.
+          The classic accident is convenient defaults quietly reaching real
+          users because nobody realised they were the development ones. Here,
+          forgetting gets you the careful setting, and startup tells you plainly
+          which one you are in.
+        </p>
+      </div>
+
+      <p>Three other things change once it isn't only you:</p>
+      <ul>
+        <li>
+          <strong>Everyone gets their own key, and every key has a job
+          description.</strong> Reading work, starting work, answering
+          approvals, administering &mdash; each granted separately. The key your
+          status dashboard uses cannot start anything.
+        </li>
+        <li>
+          <strong>A leaked key can be switched off immediately.</strong>
+          Revoking it takes hold across every running copy at once: no restart,
+          and no window in which it still quietly works.
+        </li>
+        <li>
+          <strong>Nothing is exposed to the network directly.</strong> The
+          published setup puts a dedicated gatekeeper in front to handle
+          encryption, and the orchestrator opens no public door of its own.
+        </li>
+      </ul>
+
+      <p>
+        None of that is aspiration. A script in the repository starts the real
+        multi-copy arrangement, revokes a key mid-flight, tries to reach a
+        forbidden address, and attempts to walk in wearing a forged identity
+        &mdash; then fails loudly if any of it behaves other than as described.
+      </p>
+    </div>
+  </section>
+
   <!-- ======================= FIT ======================= -->
   <section class="doc">
     <div class="rail"><span>Is it for you</span></div>
@@ -831,7 +951,7 @@ orchestrator audit   &lt;id&gt;   <span class="c"># every decision, in order</sp
         <div class="figure"><span class="v">40–120s</span><span class="l">per thinking step</span></div>
         <div class="figure"><span class="v">3–8 min</span><span class="l">a small job, end to end</span></div>
         <div class="figure"><span class="v">£0</span><span class="l">running locally</span></div>
-        <div class="figure"><span class="v">240</span><span class="l">automated tests passing</span></div>
+        <div class="figure"><span class="v">701</span><span class="l">automated tests</span></div>
       </div>
 
       <p>
@@ -893,10 +1013,12 @@ orchestrator audit   &lt;id&gt;   <span class="c"># every decision, in order</sp
 <footer>
   <div class="wrap">
     <div class="inner">
-      Universal AI Orchestration Platform &middot; plain-language guide.
+      Sentinel orchestrator &middot; plain-language guide.
       For the technical detail see <span class="mono">ARCHITECTURE.md</span>,
-      <span class="mono">ORCHESTRATION_GUIDE.md</span>, and the
+      <span class="mono">ORCHESTRATION_GUIDE.md</span>,
+      <span class="mono">docs/security.md</span>, and the
       <span class="mono">docs/</span> folder.
+      Source: <a href="https://github.com/fshbet/sentinel-orchestrator">github.com/fshbet/sentinel-orchestrator</a>.
     </div>
   </div>
 </footer>
