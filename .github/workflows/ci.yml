@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Without this, a feature branch cannot be checked at all: the push trigger
+  # is limited to main and the only other entry point is opening a pull
+  # request. A branch that cannot be checked until it is proposed for merge is
+  # the same shape of problem as a check that cannot fail.
+  workflow_dispatch:
 
 jobs:
   test:
