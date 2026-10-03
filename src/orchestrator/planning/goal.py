@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any
 
 from ..core.domain.enums import KnowledgeStatus, ModelCapability
 from ..core.domain.jsonio import extract_json as _extract_json
 from ..core.domain.models import Requirements, SuccessCriterion
+from ..errors import ConfigurationError
 from ..llm.base import CompletionRequest, Message
 from ..llm.routing import ModelRouter, RoutingRequirements
 
@@ -115,9 +117,7 @@ class GoalAnalysis:
 # Models routinely write these as the *string* value of an optional field
 # rather than emitting JSON null. Taking them literally produces a validator
 # named "null", which then fails at gate time far from the cause.
-_NULL_SENTINELS = frozenset(
-    {"", "null", "none", "nil", "n/a", "na", "undefined", "-"}
-)
+_NULL_SENTINELS = frozenset({"", "null", "none", "nil", "n/a", "na", "undefined", "-"})
 
 
 def _validator_name(raw: Any, known: frozenset[str] | None) -> str | None:
@@ -166,7 +166,7 @@ class GoalAnalyzer:
                     available_tools=available_tools,
                     available_capabilities=available_capabilities,
                 )
-            except Exception:  # noqa: BLE001 - fall back rather than fail the run
+            except Exception:  # noqa: BLE001, S110 - fall back rather than fail the run
                 pass
         return self.heuristic(objective, context or {})
 
@@ -181,6 +181,15 @@ class GoalAnalyzer:
         available_tools: Sequence[str] = (),
         available_capabilities: Sequence[str] = (),
     ) -> GoalAnalysis:
+        # analyze() checks this before calling, so reaching here with no
+        # router is a programming error rather than a configuration one.
+        # Narrowed to a local so the precondition is stated once.
+        router = self.router
+        if router is None:  # pragma: no cover - guarded by the caller
+            raise ConfigurationError(
+                "goal analysis needs a model router", remedy="configure a provider"
+            )
+
         prompt = [f"Objective:\n{objective}"]
         # Without this the analyser cannot tell a genuine blocker from something
         # the platform can simply go and fetch, and a careful model will stop to
@@ -196,7 +205,7 @@ class GoalAnalyzer:
                 "Known context (do not treat as requirements):\n"
                 + json.dumps(context, default=str)[:4000]
             )
-        response = await self.router.complete(
+        response = await router.complete(
             CompletionRequest(
                 system=SYSTEM_PROMPT,
                 messages=[Message(role="user", content="\n\n".join(prompt))],
@@ -246,9 +255,7 @@ class GoalAnalyzer:
                 criteria.append(
                     SuccessCriterion(
                         description=str(entry.get("description", "")),
-                        validator=_validator_name(
-                            entry.get("validator"), known_validators
-                        ),
+                        validator=_validator_name(entry.get("validator"), known_validators),
                         validator_config=dict(entry.get("validator_config", {})),
                         mandatory=bool(entry.get("mandatory", True)),
                     )

@@ -9,10 +9,16 @@ per-integration.
 from __future__ import annotations
 
 import asyncio
+
+# `builtins` is imported because the registries below expose a public
+# `list()` method, which shadows the builtin inside their own class body.
+# `-> builtins.list[X]` is the annotation that keeps the method name.
+import builtins
 import inspect
 import time
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Protocol, Sequence
+from typing import Any, Protocol
 
 from ..core.domain.enums import ToolSource
 from ..core.domain.ids import deterministic_id
@@ -80,7 +86,7 @@ class ToolRegistry:
             return
         try:
             getattr(self.metrics, method)(*args, **kwargs)
-        except Exception:  # noqa: BLE001 - deliberate: metrics never fail work
+        except Exception:  # noqa: BLE001, S110 - deliberate: metrics never fail work
             pass
 
     def _metric_tool_id(self, tool_id: str) -> str:
@@ -93,7 +99,13 @@ class ToolRegistry:
         """
         if tool_id in self._tools and self._tools[tool_id].spec.source.value == "native":
             return tool_id
-        return tool_id if tool_id in self._tools and len(tool_id) <= 64             and all(c.isalnum() or c in "._-:/" for c in tool_id) else "other"
+        return (
+            tool_id
+            if tool_id in self._tools
+            and len(tool_id) <= 64
+            and all(c.isalnum() or c in "._-:/" for c in tool_id)
+            else "other"
+        )
 
     # -- registration ------------------------------------------------------
 
@@ -148,7 +160,7 @@ class ToolRegistry:
             specs = [s for s in specs if s.source is source]
         return sorted(specs, key=lambda s: s.id)
 
-    def for_scope(self, scope: PermissionScope) -> list[ToolSpec]:
+    def for_scope(self, scope: PermissionScope) -> builtins.list[ToolSpec]:
         """Tools an agent is actually allowed to see (spec section 44)."""
         visible = []
         for spec in self.list():
@@ -178,26 +190,23 @@ class ToolRegistry:
             return False
         return not scope.allows_server(spec.source_ref)
 
-    def schemas(self, tool_ids: Sequence[str] | None = None) -> list[dict[str, Any]]:
+    def schemas(
+        self, tool_ids: Sequence[str] | None = None
+    ) -> builtins.list[dict[str, Any]]:
         """Tool descriptions in the shape model providers expect."""
-        specs = (
-            [self.get(tid) for tid in tool_ids] if tool_ids is not None else self.list()
-        )
+        specs = [self.get(tid) for tid in tool_ids] if tool_ids is not None else self.list()
         return [
             {
                 "name": spec.id,
                 "description": spec.description,
-                "input_schema": spec.input_schema
-                or {"type": "object", "properties": {}},
+                "input_schema": spec.input_schema or {"type": "object", "properties": {}},
             }
             for spec in specs
         ]
 
     # -- authorisation -----------------------------------------------------
 
-    def authorize(
-        self, tool_id: str, context: ToolContext
-    ) -> tuple[ToolSpec, Any]:
+    def authorize(self, tool_id: str, context: ToolContext) -> tuple[ToolSpec, Any]:
         """Check scope then policy. Raises ``PermissionDenied`` when refused."""
         spec = self.get(tool_id)
 
@@ -286,9 +295,7 @@ class ToolRegistry:
         except PermissionDenied:
             # A refusal is an outcome worth counting: a spike in denials is
             # either a misconfiguration or an attack, and both need seeing.
-            self._record(
-                "tool_called", self._metric_tool_id(call.tool_id), "denied", 0.0
-            )
+            self._record("tool_called", self._metric_tool_id(call.tool_id), "denied", 0.0)
             self._record("policy_denied", "tool", "permission")
             raise
         entry = self._tools[call.tool_id]
@@ -333,7 +340,7 @@ class ToolRegistry:
                 output = await self._invoke(
                     entry.handler, call.arguments, context, effective_timeout
                 )
-            except asyncio.TimeoutError as exc:
+            except TimeoutError as exc:
                 last_error = ToolTimeout(
                     f"tool {call.tool_id} timed out after {effective_timeout}s",
                     tool_id=call.tool_id,
@@ -363,7 +370,9 @@ class ToolRegistry:
                 )
                 self._audit_result(context, result)
                 self._record(
-                    "tool_called", self._metric_tool_id(call.tool_id), "ok",
+                    "tool_called",
+                    self._metric_tool_id(call.tool_id),
+                    "ok",
                     result.duration_ms / 1000.0,
                 )
                 return result
@@ -387,7 +396,9 @@ class ToolRegistry:
         self._audit_result(context, result)
         outcome = "timeout" if isinstance(last_error, ToolTimeout) else "error"
         self._record(
-            "tool_called", self._metric_tool_id(call.tool_id), outcome,
+            "tool_called",
+            self._metric_tool_id(call.tool_id),
+            outcome,
             result.duration_ms / 1000.0,
         )
         return result
@@ -444,4 +455,3 @@ def tool(
         return spec, handler
 
     return wrap
-

@@ -12,8 +12,9 @@ so a plugin cannot quietly reach into execution state.
 from __future__ import annotations
 
 import importlib
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any
 
 from ..agents.capabilities import CapabilityRegistry
 from ..agents.registry import AgentRegistry
@@ -70,9 +71,7 @@ class PluginRegistry:
     def add_skill(self, skill: Skill) -> Skill:
         """Register reusable knowledge an agent can be given."""
         if self.skills is None:
-            raise ConfigurationError(
-                "this platform was assembled without a skill registry"
-            )
+            raise ConfigurationError("this platform was assembled without a skill registry")
         return self.skills.register(skill)
 
     def add_storage(self, store: Any) -> Any:
@@ -124,15 +123,13 @@ def load_module(name: str, registry: PluginRegistry) -> LoadedPlugin:
 def load_entry_points(
     registry: PluginRegistry, *, group: str = ENTRY_POINT_GROUP
 ) -> list[LoadedPlugin]:
-    try:
-        from importlib.metadata import entry_points
-    except ImportError:  # pragma: no cover - Python < 3.8
-        return []
+    # requires-python is >=3.11, where importlib.metadata.entry_points
+    # always exists and always accepts `group`. The two fallbacks that
+    # used to be here could not run on any supported interpreter.
+    from importlib.metadata import entry_points
+
     loaded: list[LoadedPlugin] = []
-    try:
-        points = entry_points(group=group)
-    except TypeError:  # pragma: no cover - older API shape
-        points = entry_points().get(group, [])  # type: ignore[call-arg]
+    points = entry_points(group=group)
     for point in points:
         try:
             target = point.load()
@@ -144,9 +141,7 @@ def load_entry_points(
         register = target if callable(target) else getattr(target, "register", None)
         if not callable(register):
             loaded.append(
-                LoadedPlugin(
-                    point.name, "entry_point", False, "target is not callable"
-                )
+                LoadedPlugin(point.name, "entry_point", False, "target is not callable")
             )
             continue
         try:

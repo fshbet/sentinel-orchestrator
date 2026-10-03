@@ -11,7 +11,11 @@ domain-neutral.
 
 from __future__ import annotations
 
-from typing import Iterable
+# `builtins` is imported because this module's registry exposes a public
+# `list()` method, which shadows the builtin inside its own class body.
+# `-> builtins.list[X]` is the annotation that keeps the method name.
+import builtins
+from collections.abc import Iterable
 
 from ..core.domain.models import Capability, CapabilityRequirements
 from ..errors import ConfigurationError, NotFound
@@ -74,7 +78,7 @@ class CapabilityRegistry:
     def ids(self) -> set[str]:
         return set(self._capabilities)
 
-    def missing(self, required: Iterable[str]) -> list[str]:
+    def missing(self, required: Iterable[str]) -> builtins.list[str]:
         return sorted(c for c in required if c not in self._capabilities)
 
     def requirements_for(self, required: Iterable[str]) -> CapabilityRequirements:
@@ -89,9 +93,7 @@ class CapabilityRegistry:
             requirements = self.get(capability_id).requirements
             tools.extend(t for t in requirements.tools if t not in tools)
             skills.extend(s for s in requirements.skills if s not in skills)
-            permissions.extend(
-                p for p in requirements.permissions if p not in permissions
-            )
+            permissions.extend(p for p in requirements.permissions if p not in permissions)
             model_capabilities.extend(
                 m for m in requirements.model_capabilities if m not in model_capabilities
             )

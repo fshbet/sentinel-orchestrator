@@ -20,11 +20,16 @@ authorised to do.
 
 from __future__ import annotations
 
+# `builtins` is imported because this module's registry exposes a public
+# `list()` method, which shadows the builtin inside its own class body.
+# `-> builtins.list[X]` is the annotation that keeps the method name.
+import builtins
 import json
 import re
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 from ..core.domain.serde import to_jsonable
 from ..errors import ConfigurationError, NotFound
@@ -88,7 +93,9 @@ def _parse_front_matter(text: str) -> tuple[dict[str, Any], str]:
     return metadata, body
 
 
-def skill_from_text(text: str, *, source: str | None = None, fallback_id: str = "") -> Skill:
+def skill_from_text(
+    text: str, *, source: str | None = None, fallback_id: str = ""
+) -> Skill:
     """Parse a skill document: front matter plus body."""
     metadata, body = _parse_front_matter(text)
     skill_id = str(metadata.get("id") or fallback_id).strip()
@@ -206,36 +213,28 @@ class SkillRegistry:
         return skill_id in self._latest
 
     def list(self) -> list[Skill]:
-        return sorted(
-            (self.get(skill_id) for skill_id in self._latest), key=lambda s: s.id
-        )
+        return sorted((self.get(skill_id) for skill_id in self._latest), key=lambda s: s.id)
 
-    def versions(self, skill_id: str) -> list[str]:
-        return sorted(
-            (v for (sid, v) in self._by_key if sid == skill_id), key=_version_key
-        )
+    def versions(self, skill_id: str) -> builtins.list[str]:
+        return sorted((v for (sid, v) in self._by_key if sid == skill_id), key=_version_key)
 
-    def missing(self, required: Iterable[str]) -> list[str]:
+    def missing(self, required: Iterable[str]) -> builtins.list[str]:
         return sorted(s for s in required if not self.has(s))
 
     def snapshot_versions(self) -> dict[str, str]:
         """Skill id -> version, pinned onto an execution for reproducibility."""
         return dict(self._latest)
 
-    def for_capabilities(self, capabilities: Iterable[str]) -> list[Skill]:
+    def for_capabilities(self, capabilities: Iterable[str]) -> builtins.list[Skill]:
         """Skills that declare themselves relevant to these capabilities."""
         wanted = set(capabilities)
-        return [
-            skill
-            for skill in self.list()
-            if wanted & set(skill.applies_to)
-        ]
+        return [skill for skill in self.list() if wanted & set(skill.applies_to)]
 
     # -- composition -------------------------------------------------------
 
     def resolve(
         self, skill_ids: Sequence[str], *, pinned: dict[str, str] | None = None
-    ) -> list[Skill]:
+    ) -> builtins.list[Skill]:
         """Resolve skills and everything they require, in dependency order.
 
         A missing skill is skipped rather than raising: an agent should still

@@ -21,7 +21,7 @@ _TYPE_HINT_CACHE: dict[type, dict[str, Any]] = {}
 
 
 def utcnow() -> _dt.datetime:
-    return _dt.datetime.now(_dt.timezone.utc)
+    return _dt.datetime.now(_dt.UTC)
 
 
 def to_jsonable(value: Any) -> Any:
@@ -32,8 +32,8 @@ def to_jsonable(value: Any) -> Any:
         return value.value
     if isinstance(value, _dt.datetime):
         if value.tzinfo is None:
-            value = value.replace(tzinfo=_dt.timezone.utc)
-        return value.astimezone(_dt.timezone.utc).isoformat()
+            value = value.replace(tzinfo=_dt.UTC)
+        return value.astimezone(_dt.UTC).isoformat()
     if isinstance(value, _dt.date):
         return value.isoformat()
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
@@ -75,7 +75,7 @@ def _coerce(hint: Any, value: Any) -> Any:
         for arg in args:
             try:
                 return _coerce(arg, value)
-            except Exception:  # noqa: BLE001 - deliberate best-effort union walk
+            except Exception:  # noqa: BLE001, S112 - deliberate best-effort union walk
                 continue
         return value
 
@@ -91,8 +91,8 @@ def _coerce(hint: Any, value: Any) -> Any:
         return items
 
     if origin is dict:
-        args = get_args(hint) or (str, Any)
-        key_hint, val_hint = args[0], args[1]
+        dict_args = get_args(hint) or (str, Any)
+        key_hint, val_hint = dict_args[0], dict_args[1]
         return {
             _coerce(key_hint, k): _coerce(val_hint, v) for k, v in (value or {}).items()
         }
@@ -105,7 +105,7 @@ def _coerce(hint: Any, value: Any) -> Any:
                 return value
             parsed = _dt.datetime.fromisoformat(str(value))
             if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=_dt.timezone.utc)
+                parsed = parsed.replace(tzinfo=_dt.UTC)
             return parsed
         if dataclasses.is_dataclass(hint):
             return from_dict(hint, value)

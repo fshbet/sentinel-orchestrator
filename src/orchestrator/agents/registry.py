@@ -10,9 +10,14 @@ can be replayed against the exact definition it ran with (spec section 69).
 
 from __future__ import annotations
 
+# `builtins` is imported because this module's registry exposes a public
+# `list()` method, which shadows the builtin inside its own class body.
+# `-> builtins.list[X]` is the annotation that keeps the method name.
+import builtins
 import json
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from ..core.domain.enums import ModelCapability
 from ..core.domain.models import AgentConstraints, AgentSpec
@@ -99,12 +104,10 @@ class AgentRegistry:
         return agent_id in self._current
 
     def list(self, *, include_ephemeral: bool = True) -> list[AgentSpec]:
-        agents = self._current.values()
-        if not include_ephemeral:
-            agents = [a for a in agents if not a.ephemeral]
+        agents = [a for a in self._current.values() if include_ephemeral or not a.ephemeral]
         return sorted(agents, key=lambda a: a.id)
 
-    def providing(self, capability_id: str) -> list[AgentSpec]:
+    def providing(self, capability_id: str) -> builtins.list[AgentSpec]:
         """Every registered agent advertising a capability."""
         return [a for a in self.list() if capability_id in a.capabilities]
 

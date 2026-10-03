@@ -13,8 +13,9 @@ platform into an elaborate plan for a one-line task.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Sequence
+from typing import Any
 
 from ..core.domain.enums import OrchestrationPattern, PlanStrategy, RiskLevel
 from ..core.domain.models import Requirements
@@ -77,7 +78,7 @@ class OrchestrationChoice:
     max_parallel: int = 1
     use_evaluator: bool = False
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "pattern": self.pattern.value,
             "plan_strategy": self.plan_strategy.value,

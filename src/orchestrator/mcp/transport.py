@@ -14,10 +14,11 @@ import abc
 import asyncio
 import json
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
-from ..errors import MCPProtocolError, MCPTimeout, MCPError
+from ..errors import MCPError, MCPProtocolError, MCPTimeout
 
 JSONRPC_VERSION = "2.0"
 
@@ -62,7 +63,7 @@ class Transport(abc.ABC):
             return
         try:
             self.on_notification(message.get("method", ""), message.get("params") or {})
-        except Exception:  # noqa: BLE001 - a handler must not break the transport
+        except Exception:  # noqa: BLE001, S110 - a handler must not break the transport
             pass
 
 
@@ -193,7 +194,7 @@ class StdioTransport(Transport):
         )
         try:
             return await asyncio.wait_for(future, timeout=timeout)
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             self._pending.pop(request_id, None)
             # Tell the server to stop working on it (spec: cancellation).
             try:
@@ -201,7 +202,7 @@ class StdioTransport(Transport):
                     "notifications/cancelled",
                     {"requestId": request_id, "reason": "client timeout"},
                 )
-            except Exception:  # noqa: BLE001 - best effort
+            except Exception:  # noqa: BLE001, S110 - best effort
                 pass
             raise MCPTimeout(
                 f"MCP request {method} timed out after {timeout}s", method=method
@@ -221,7 +222,7 @@ class StdioTransport(Transport):
                 self._process.stdin.close()
             try:
                 await asyncio.wait_for(self._process.wait(), timeout=5.0)
-            except asyncio.TimeoutError:  # pragma: no cover - stubborn child
+            except TimeoutError:  # pragma: no cover - stubborn child
                 self._process.kill()
                 await self._process.wait()
         self._fail_pending(MCPError("transport closed"))
@@ -261,8 +262,7 @@ class StreamableHTTPTransport(Transport):
             import httpx
         except ImportError as exc:  # pragma: no cover - environment dependent
             raise MCPError(
-                "HTTP MCP transport requires httpx; install"
-                " universal-orchestrator[http]"
+                "HTTP MCP transport requires httpx; install universal-orchestrator[http]"
             ) from exc
         return httpx
 
@@ -322,9 +322,7 @@ class StreamableHTTPTransport(Transport):
         result: Any = None
         for block in body.split("\n\n"):
             data_lines = [
-                line[5:].strip()
-                for line in block.splitlines()
-                if line.startswith("data:")
+                line[5:].strip() for line in block.splitlines() if line.startswith("data:")
             ]
             if not data_lines:
                 continue

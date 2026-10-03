@@ -11,12 +11,14 @@ import asyncio
 import copy
 import json
 import sys
-from typing import Any, Optional
+from typing import Any
 
 try:
     import typer
 except ImportError:  # pragma: no cover - environment dependent
     typer = None  # type: ignore[assignment]
+
+from datetime import UTC
 
 from ..config.loader import load, write_default
 from ..core.domain.enums import OrchestrationPattern, PlanStrategy
@@ -58,9 +60,9 @@ def _fail(message: str, code: int = 1) -> None:
 
 
 async def _build(
-    config_path: Optional[str] = None,
+    config_path: str | None = None,
     *,
-    workspace: Optional[str] = None,
+    workspace: str | None = None,
     connect_mcp: bool = True,
 ) -> Orchestrator:
     config = load(paths=[config_path] if config_path else None)
@@ -145,12 +147,12 @@ if typer is not None:
     @app.command()
     def run(
         objective: str = typer.Argument(..., help="What to accomplish."),
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
-        workspace: Optional[str] = typer.Option(None, "--workspace", "-w"),
-        pattern: Optional[str] = typer.Option(
+        config: str | None = typer.Option(None, "--config", "-c"),
+        workspace: str | None = typer.Option(None, "--workspace", "-w"),
+        pattern: str | None = typer.Option(
             None, "--pattern", help="Force an orchestration pattern."
         ),
-        strategy: Optional[str] = typer.Option(
+        strategy: str | None = typer.Option(
             None, "--strategy", help="Force a planning strategy."
         ),
         detach: bool = typer.Option(
@@ -183,8 +185,8 @@ if typer is not None:
 
     @app.command()
     def status(
-        execution_id: Optional[str] = typer.Argument(None),
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        execution_id: str | None = typer.Argument(None),
+        config: str | None = typer.Option(None, "--config", "-c"),
         limit: int = typer.Option(20, "--limit"),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
@@ -219,7 +221,7 @@ if typer is not None:
     @app.command()
     def inspect(
         execution_id: str = typer.Argument(...),
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
         """Show the full task graph and validation record."""
@@ -233,7 +235,9 @@ if typer is not None:
                     "plan": {
                         "version": execution.plan_version,
                         "pattern": execution.plan.pattern.value if execution.plan else None,
-                        "strategy": execution.plan.strategy.value if execution.plan else None,
+                        "strategy": execution.plan.strategy.value
+                        if execution.plan
+                        else None,
                         "rationale": execution.plan.rationale if execution.plan else "",
                     },
                     "requirements": execution.requirements.to_dict(),
@@ -288,21 +292,20 @@ if typer is not None:
                 _echo("  validations:")
                 for v in data["validations"]:
                     mark = "PASS" if v["passed"] else "FAIL"
-                    _echo(f"    {mark} {v['validator']} ({v['confidence']}) {v['message'][:80]}")
+                    _echo(
+                        f"    {mark} {v['validator']} ({v['confidence']}) {v['message'][:80]}"
+                    )
             if data["failures"]:
                 _echo("  failures:")
                 for f in data["failures"]:
-                    _echo(
-                        f"    [{f['category']}] {f['message'][:80]}"
-                        f" -> {f['recovery']}"
-                    )
+                    _echo(f"    [{f['category']}] {f['message'][:80]} -> {f['recovery']}")
 
         _emit(_run(main()), as_json, render)
 
     @app.command()
     def audit(
         execution_id: str = typer.Argument(...),
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         after: int = typer.Option(0, "--after", help="Only events after this sequence."),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
@@ -329,7 +332,7 @@ if typer is not None:
     @app.command()
     def pause(
         execution_id: str = typer.Argument(...),
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
         """Request a graceful pause."""
@@ -346,7 +349,7 @@ if typer is not None:
     @app.command()
     def resume(
         execution_id: str = typer.Argument(...),
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
         """Resume a paused or waiting execution."""
@@ -364,7 +367,7 @@ if typer is not None:
     def cancel(
         execution_id: str = typer.Argument(...),
         reason: str = typer.Option("", "--reason"),
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
         """Cancel an execution gracefully."""
@@ -385,8 +388,8 @@ if typer is not None:
         execution_id: str = typer.Argument(...),
         approval_id: str = typer.Argument(...),
         reject: bool = typer.Option(False, "--reject"),
-        response: Optional[str] = typer.Option(None, "--response"),
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        response: str | None = typer.Option(None, "--response"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
         """Answer a pending approval and continue."""
@@ -410,7 +413,7 @@ if typer is not None:
 
     @app.command()
     def agents(
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
         """List registered agents."""
@@ -418,7 +421,7 @@ if typer is not None:
 
     @app.command()
     def capabilities(
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
         """List registered capabilities."""
@@ -426,7 +429,7 @@ if typer is not None:
 
     @app.command()
     def tools(
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
         """List available tools and their permissions."""
@@ -434,7 +437,7 @@ if typer is not None:
 
     @app.command()
     def models(
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
         """List models and their advertised capabilities."""
@@ -442,7 +445,7 @@ if typer is not None:
 
     @app.command()
     def skills(
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
         """List registered skills and what they apply to."""
@@ -450,7 +453,7 @@ if typer is not None:
 
     @app.command()
     def workflows(
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
         """List registered workflow definitions."""
@@ -458,7 +461,7 @@ if typer is not None:
 
     @app.command()
     def mcp(
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
         """Show MCP server health, capabilities, and authorisation state."""
@@ -480,7 +483,9 @@ if typer is not None:
                 _echo(f"{server['server']}  {server.get('status', 'unknown')}")
                 _echo(f"  transport  {server.get('transport')} {server.get('target', '')}")
                 _echo(f"  protocol   {server.get('protocol_version')}")
-                _echo(f"  registered {', '.join(server.get('tools_registered', [])) or '-'}")
+                _echo(
+                    f"  registered {', '.join(server.get('tools_registered', [])) or '-'}"
+                )
                 for denied in server.get("tools_denied", []):
                     _echo(f"  DENIED     {denied['tool']}: {denied['reason'][:80]}")
                 if server.get("error"):
@@ -490,7 +495,7 @@ if typer is not None:
 
     @app.command()
     def health(
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
         """Report platform, model, and MCP health."""
@@ -512,7 +517,9 @@ if typer is not None:
             )
             for model in report["models"]:
                 mark = "up" if model["available"] else "down"
-                _echo(f"model       {model['provider']:<20} {mark} {model.get('error') or ''}")
+                _echo(
+                    f"model       {model['provider']:<20} {mark} {model.get('error') or ''}"
+                )
             for server in report["mcp"]:
                 _echo(f"mcp         {server['server']:<20} {server.get('status')}")
             for plugin in report["plugins"]:
@@ -523,13 +530,14 @@ if typer is not None:
 
     @app.command()
     def validate(
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         isolated: bool = typer.Option(
-            False, "--isolated",
+            False,
+            "--isolated",
             help="Check only the named file, ignoring discovered configs. "
-                 "Use this to check a deployment config from a developer "
-                 "machine, where an ambient .orchestrator/config.yaml would "
-                 "otherwise be merged in and change the answer.",
+            "Use this to check a deployment config from a developer "
+            "machine, where an ambient .orchestrator/config.yaml would "
+            "otherwise be merged in and change the answer.",
         ),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
@@ -575,9 +583,7 @@ if typer is not None:
                 document.setdefault("storage", {})["backend"] = "memory"
                 checking = Config(document)
 
-            orchestrator = await Orchestrator.create(
-                config=checking, connect_mcp=False
-            )
+            orchestrator = await Orchestrator.create(config=checking, connect_mcp=False)
             try:
                 described = orchestrator.describe()
                 known_capabilities = {c["id"] for c in described["capabilities"]}
@@ -614,8 +620,7 @@ if typer is not None:
                     for skill_id in agent.get("skills", []):
                         if not orchestrator.skills.has(skill_id):
                             problems.append(
-                                f"agent {agent['id']} declares unknown skill"
-                                f" {skill_id}"
+                                f"agent {agent['id']} declares unknown skill {skill_id}"
                             )
                 if not described["models"]:
                     problems.append(
@@ -698,16 +703,18 @@ if typer is not None:
 
     @app.command()
     def evaluate(
-        suite: Optional[str] = typer.Option(
-            None, "--suite",
+        suite: str | None = typer.Option(
+            None,
+            "--suite",
             help="One of: planning, tool_selection, policy, injection, egress, "
-                 "validation, recovery. Omit to run everything.",
+            "validation, recovery. Omit to run everything.",
         ),
-        report: Optional[str] = typer.Option(
+        report: str | None = typer.Option(
             None, "--report", help="Write JSON and Markdown reports to this path."
         ),
-        min_quality: Optional[float] = typer.Option(
-            None, "--min-quality",
+        min_quality: float | None = typer.Option(
+            None,
+            "--min-quality",
             help="Fail if the non-gating pass rate falls below this (0-1).",
         ),
         as_json: bool = typer.Option(False, "--json"),
@@ -769,7 +776,7 @@ if typer is not None:
         apply: bool = typer.Option(
             False, "--apply", help="Apply pending migrations. Default is status only."
         ),
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
         """Inspect or apply schema migrations.
@@ -777,6 +784,7 @@ if typer is not None:
         Status by default. Applying is idempotent, so running it twice, or on
         two instances at once, converges rather than conflicting.
         """
+
         async def _run_migrate():
             from ..core.state import migrations as m
 
@@ -835,17 +843,19 @@ if typer is not None:
     @app.command()
     def prune(
         older_than_days: int = typer.Option(
-            90, "--older-than-days",
+            90,
+            "--older-than-days",
             help="Delete finished executions last updated before this many days ago.",
         ),
         dry_run: bool = typer.Option(
-            True, "--dry-run/--apply",
+            True,
+            "--dry-run/--apply",
             help="Report what would be deleted. Defaults to a dry run.",
         ),
         vacuum: bool = typer.Option(
             False, "--vacuum", help="Return freed space to the filesystem afterwards."
         ),
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         as_json: bool = typer.Option(False, "--json"),
     ) -> None:
         """Delete old finished executions and their audit trails.
@@ -855,6 +865,7 @@ if typer is not None:
         age. Defaults to a dry run: deleting audit history is not something
         to do by mistyping a flag.
         """
+
         async def _run_prune():
             orchestrator = await _build(config, connect_mcp=False)
             try:
@@ -864,17 +875,18 @@ if typer is not None:
                 if dry_run:
                     # Count without deleting by pruning a copy of nothing:
                     # list eligible rows through the store's own rules.
+                    from datetime import datetime, timedelta
+
                     from ..core.state.sqlite_store import PRUNABLE_STATUSES
-                    from datetime import datetime, timedelta, timezone
 
                     cutoff = (
-                        datetime.now(timezone.utc) - timedelta(days=older_than_days)
+                        datetime.now(UTC) - timedelta(days=older_than_days)
                     ).isoformat()
                     # Only "?" characters are interpolated; the statuses
                     # themselves are bound parameters below.
                     placeholders = ",".join("?" for _ in PRUNABLE_STATUSES)
                     rows = store._conn.execute(
-                        f"SELECT status, COUNT(*) FROM executions "  # nosec B608
+                        f"SELECT status, COUNT(*) FROM executions "  # noqa: S608  # nosec B608
                         f"WHERE updated_at < ? AND status IN ({placeholders}) "
                         f"GROUP BY status",
                         (cutoff, *PRUNABLE_STATUSES),
@@ -920,16 +932,18 @@ if typer is not None:
     def serve(
         host: str = typer.Option("127.0.0.1", "--host"),
         port: int = typer.Option(8080, "--port"),
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         cors_origin: list[str] = typer.Option(
-            [], "--cors-origin",
+            [],
+            "--cors-origin",
             help="Allow browser calls from this origin. Repeatable. "
-                 "Unnecessary when using the console served at /.",
+            "Unnecessary when using the console served at /.",
         ),
         insecure_no_auth: bool = typer.Option(
-            False, "--i-have-my-own-authentication",
+            False,
+            "--i-have-my-own-authentication",
             help="Bind a non-loopback address without a token. Only when "
-                 "another layer in front of this process authenticates callers.",
+            "another layer in front of this process authenticates callers.",
         ),
     ) -> None:
         """Run the REST API and web console.
@@ -941,9 +955,11 @@ if typer is not None:
         try:
             import uvicorn
         except ImportError:
-            _fail("the API requires fastapi and uvicorn: pip install universal-orchestrator[api]")
+            _fail(
+                "the API requires fastapi and uvicorn: pip install universal-orchestrator[api]"
+            )
         from ..api.app import create_app
-        from ..api.security import SecurityConfig, InsecureBinding
+        from ..api.security import InsecureBinding, SecurityConfig
 
         security = SecurityConfig.from_env(
             host=host,
@@ -968,12 +984,9 @@ if typer is not None:
         identities = getattr(application.state, "identities", None)
 
         principal_count = len(identities) if identities is not None else 0
-        shared = bool(getattr(getattr(identities, "tokens", None),
-                              "distributed", False))
+        shared = bool(getattr(getattr(identities, "tokens", None), "distributed", False))
         if principal_count and security.enabled:
-            summary = (
-                f"{principal_count} principal(s) + legacy ORCHESTRATOR_API_TOKEN"
-            )
+            summary = f"{principal_count} principal(s) + legacy ORCHESTRATOR_API_TOKEN"
         elif principal_count:
             summary = f"bearer token, {principal_count} principal(s)"
         elif security.enabled:
@@ -993,16 +1006,14 @@ if typer is not None:
             )
         elif identities is not None:
             for principal in identities.principals():
-                typer.echo(
-                    f"    {principal.id:<16} {', '.join(sorted(principal.scopes))}"
-                )
+                typer.echo(f"    {principal.id:<16} {', '.join(sorted(principal.scopes))}")
         typer.echo(f"  console: http://{host}:{port}/")
 
         uvicorn.run(application, host=host, port=port)
 
     @app.command("mcp-serve")
     def mcp_serve(
-        config: Optional[str] = typer.Option(None, "--config", "-c"),
+        config: str | None = typer.Option(None, "--config", "-c"),
         allow_control: bool = typer.Option(
             False,
             "--allow-control",
@@ -1015,7 +1026,7 @@ if typer is not None:
         _run(serve_stdio(config_path=config, allow_control=allow_control))
 
     def _list_section(
-        config: Optional[str], section: str, as_json: bool, *, connect_mcp: bool = True
+        config: str | None, section: str, as_json: bool, *, connect_mcp: bool = True
     ) -> None:
         async def main():
             orchestrator = await _build(config, connect_mcp=connect_mcp)
@@ -1035,7 +1046,9 @@ if typer is not None:
                 for key, value in extra.items():
                     if value in (None, "", [], {}):
                         continue
-                    rendered = ", ".join(map(str, value)) if isinstance(value, list) else value
+                    rendered = (
+                        ", ".join(map(str, value)) if isinstance(value, list) else value
+                    )
                     _echo(f"    {key}: {rendered}")
 
         _emit(_run(main()), as_json, render)
@@ -1043,9 +1056,7 @@ if typer is not None:
 
 def main() -> None:
     if typer is None:  # pragma: no cover - environment dependent
-        _fail(
-            "the CLI requires typer: pip install universal-orchestrator[cli]"
-        )
+        _fail("the CLI requires typer: pip install universal-orchestrator[cli]")
     app()
 
 

@@ -12,8 +12,8 @@ so a broken backend does not get re-selected on the next task.
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Sequence
 
 from ..core.domain.enums import ModelCapability
 from ..core.domain.models import ModelSpec, Usage
@@ -81,7 +81,7 @@ class ModelRouter:
             return
         try:
             getattr(self.metrics, method)(*args, **kwargs)
-        except Exception:  # noqa: BLE001 - deliberate: metrics never fail work
+        except Exception:  # noqa: BLE001, S110 - deliberate: metrics never fail work
             pass
 
     # -- registration ------------------------------------------------------
@@ -239,12 +239,16 @@ class ModelRouter:
             try:
                 response = await candidate.provider.generate(request, candidate.spec)
                 self._record(
-                    "model_called", candidate.spec.id, "ok",
+                    "model_called",
+                    candidate.spec.id,
+                    "ok",
                     time.monotonic() - started,
                 )
             except ModelError as exc:
                 self._record(
-                    "model_called", candidate.spec.id, "error",
+                    "model_called",
+                    candidate.spec.id,
+                    "error",
                     time.monotonic() - started,
                 )
                 last_error = exc
@@ -308,9 +312,7 @@ class ModelRouter:
                 results.append(await provider.health())
             except Exception as exc:  # noqa: BLE001 - health must never raise
                 results.append(
-                    ProviderHealth(
-                        provider=provider.name, available=False, error=str(exc)
-                    )
+                    ProviderHealth(provider=provider.name, available=False, error=str(exc))
                 )
         return results
 

@@ -8,9 +8,15 @@ engine changing (spec section 82).
 from __future__ import annotations
 
 import abc
+
+# `builtins` is imported because StateStore exposes a public `list()`
+# method, which shadows the builtin inside its own class body.
+# `-> builtins.list[X]` is the annotation that keeps the method name.
+import builtins
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Sequence
+from typing import Any
 
 from ..domain.enums import ExecutionStatus
 from ..domain.models import AuditEvent, Execution
@@ -91,8 +97,25 @@ class StateStore(abc.ABC):
     @abc.abstractmethod
     async def audit(
         self, execution_id: str, *, after_sequence: int = 0, limit: int = 1000
-    ) -> list[AuditEvent]:
+    ) -> builtins.list[AuditEvent]:
         """Read audit events in sequence order."""
+
+    @abc.abstractmethod
+    async def record_operation(self, key: str, result: Any) -> tuple[bool, Any]:
+        """Claim an idempotency key.
+
+        Returns ``(stored, result)``: ``stored`` is False when the key was
+        already present, and ``result`` is whatever was recorded first.
+
+        This is part of the interface rather than an extra the concrete
+        stores happen to provide, because ToolRegistry requires it for
+        tool idempotency. A store without it loses exactly-once tool
+        execution, and nothing else would say so.
+        """
+
+    @abc.abstractmethod
+    async def lookup_operation(self, key: str) -> Any | None:
+        """The result recorded for an idempotency key, or None."""
 
     async def close(self) -> None:  # pragma: no cover - default no-op
         return None

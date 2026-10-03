@@ -11,8 +11,14 @@ Nothing in the orchestration core imports this module.
 from __future__ import annotations
 
 import asyncio
+
+# `builtins` is imported because the registries below expose a public
+# `list()` method, which shadows the builtin inside their own class body.
+# `-> builtins.list[X]` is the annotation that keeps the method name.
+import builtins
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 from ..core.domain.enums import RiskLevel, ToolSource
 from ..core.domain.models import ToolSpec
@@ -51,9 +57,7 @@ class ServerRecord:
             "protocol_version": self.client.protocol_version if self.client else None,
             "tools_offered": [t.name for t in self.tools],
             "tools_registered": list(self.registered_tool_ids),
-            "tools_denied": [
-                a.to_dict() for a in self.authorizations if not a.authorized
-            ],
+            "tools_denied": [a.to_dict() for a in self.authorizations if not a.authorized],
             "error": self.error,
         }
 
@@ -87,7 +91,9 @@ class MCPRegistry:
         return record
 
     def configure_many(
-        self, servers: dict[str, dict[str, Any]], policies: dict[str, MCPServerPolicy] | None = None
+        self,
+        servers: dict[str, dict[str, Any]],
+        policies: dict[str, MCPServerPolicy] | None = None,
     ) -> list[ServerRecord]:
         policies = policies or {}
         return [
@@ -99,7 +105,9 @@ class MCPRegistry:
         try:
             return self._servers[server_id]
         except KeyError as exc:
-            raise NotFound(f"MCP server {server_id} is not configured", id=server_id) from exc
+            raise NotFound(
+                f"MCP server {server_id} is not configured", id=server_id
+            ) from exc
 
     def list(self) -> list[ServerRecord]:
         return sorted(self._servers.values(), key=lambda r: r.server_id)
@@ -131,7 +139,7 @@ class MCPRegistry:
         await self.refresh(server_id)
         return record
 
-    async def connect_all(self) -> list[ServerRecord]:
+    async def connect_all(self) -> builtins.list[ServerRecord]:
         await asyncio.gather(
             *(self.connect(server_id) for server_id in list(self._servers)),
             return_exceptions=True,
@@ -242,7 +250,7 @@ class MCPRegistry:
 
     # -- introspection -----------------------------------------------------
 
-    async def health(self) -> list[dict[str, Any]]:
+    async def health(self) -> builtins.list[dict[str, Any]]:
         reports = []
         for record in self.list():
             if record.client is None:
@@ -264,10 +272,10 @@ class MCPRegistry:
             reports.append(report)
         return reports
 
-    def registered_tools(self) -> list[ToolSpec]:
+    def registered_tools(self) -> builtins.list[ToolSpec]:
         return self.tools.list(source=ToolSource.MCP)
 
-    def authorizations(self) -> list[ToolAuthorization]:
+    def authorizations(self) -> builtins.list[ToolAuthorization]:
         return [a for record in self.list() for a in record.authorizations]
 
     def _audit(self, event: str, **payload: Any) -> None:
@@ -288,9 +296,7 @@ def policies_from_config(raw: Iterable[dict[str, Any]]) -> dict[str, MCPServerPo
             deny_tools=tuple(entry.get("deny_tools", ())),
             permissions=tuple(entry.get("permissions", ("mcp.invoke",))),
             max_risk=RiskLevel(entry.get("max_risk", "medium")),
-            require_approval_above=RiskLevel(
-                entry.get("require_approval_above", "medium")
-            ),
+            require_approval_above=RiskLevel(entry.get("require_approval_above", "medium")),
             trusted=bool(entry.get("trusted", False)),
             timeout=float(entry.get("timeout", 60.0)),
         )

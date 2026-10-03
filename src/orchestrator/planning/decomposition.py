@@ -18,8 +18,9 @@ somewhere safe to land.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any
 
 from ..core.domain.enums import (
     ModelCapability,
@@ -37,7 +38,7 @@ from ..core.workflow.patterns import (
     sequential,
     single,
 )
-from ..errors import InvalidWorkflow
+from ..errors import ConfigurationError, InvalidWorkflow
 from ..llm.base import CompletionRequest, Message
 from ..llm.routing import ModelRouter, RoutingRequirements
 from ..observability.audit import AuditLog, EventType
@@ -353,6 +354,15 @@ class Planner:
         incremental: bool = False,
         reason: str = "",
     ) -> tuple[list[Task], str, bool]:
+        # _model_available() checks this before any call, so reaching here
+        # with no router is a programming error. Narrowed to a local so the
+        # precondition is stated once.
+        router = self.router
+        if router is None:  # pragma: no cover - guarded by the caller
+            raise ConfigurationError(
+                "planning needs a model router", remedy="configure a provider"
+            )
+
         requirements = execution.requirements
         sections = [f"Objective:\n{execution.objective}"]
         if requirements.explicit:
@@ -374,8 +384,7 @@ class Planner:
             + (", ".join(context.available_capabilities) or "(none registered)")
         )
         sections.append(
-            "Available validators: "
-            + (", ".join(context.available_validators) or "noop")
+            "Available validators: " + (", ".join(context.available_validators) or "noop")
         )
         if context.available_tools:
             sections.append(
@@ -397,7 +406,7 @@ class Planner:
         if context.notes:
             sections.append(context.notes)
 
-        response = await self.router.complete(
+        response = await router.complete(
             CompletionRequest(
                 system=SYSTEM_PROMPT,
                 messages=[Message(role="user", content="\n\n".join(sections))],
@@ -451,9 +460,7 @@ class Planner:
                         )
                     )
             if not validations:
-                validations.append(
-                    ValidationSpec(validator="non_empty", mandatory=True)
-                )
+                validations.append(ValidationSpec(validator="non_empty", mandatory=True))
 
             capabilities = [
                 str(c)
@@ -481,9 +488,7 @@ class Planner:
                 required_capabilities=capabilities,
                 allowed_tools=tools,
                 expected_outputs=[str(o) for o in entry.get("expected_outputs", [])],
-                completion_criteria=[
-                    str(c) for c in entry.get("completion_criteria", [])
-                ],
+                completion_criteria=[str(c) for c in entry.get("completion_criteria", [])],
                 resources=[str(r) for r in entry.get("resources", [])],
                 validations=validations,
                 risk=risk,
@@ -497,13 +502,13 @@ class Planner:
             if not isinstance(entry, dict):
                 continue
             key = str(entry.get("key") or entry.get("name") or "").strip()
-            task = by_key.get(key)
-            if task is None:
+            dependent = by_key.get(key)
+            if dependent is None:
                 continue
             for dependency_key in entry.get("depends_on", []) or []:
                 dependency = by_key.get(str(dependency_key))
-                if dependency is not None and dependency.id != task.id:
-                    task.dependencies.append(dependency.id)
+                if dependency is not None and dependency.id != dependent.id:
+                    dependent.dependencies.append(dependency.id)
 
         return list(by_key.values())
 
@@ -613,7 +618,9 @@ class Planner:
             )
         known = {task.id for task in plan.tasks}
         for task in plan.tasks:
-            task.dependencies = [d for d in task.dependencies if d in known and d != task.id]
+            task.dependencies = [
+                d for d in task.dependencies if d in known and d != task.id
+            ]
             if task.parent_id not in known:
                 task.parent_id = None
         TaskGraph(plan.tasks).validate()

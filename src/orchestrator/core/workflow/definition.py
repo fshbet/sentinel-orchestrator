@@ -12,10 +12,15 @@ silently adopt a newer shape (spec section 68).
 
 from __future__ import annotations
 
+# `builtins` is imported because the registries below expose a public
+# `list()` method, which shadows the builtin inside their own class body.
+# `-> builtins.list[X]` is the annotation that keeps the method name.
+import builtins
 import json
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from ...errors import ConfigurationError, NotFound
 from ..domain.enums import ModelCapability, OrchestrationPattern, RiskLevel
@@ -78,7 +83,7 @@ class WorkflowDefinition:
     options: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "WorkflowDefinition":
+    def from_dict(cls, data: dict[str, Any]) -> WorkflowDefinition:
         if "id" not in data:
             raise ConfigurationError("workflow definition requires an id")
         return cls(
@@ -91,7 +96,7 @@ class WorkflowDefinition:
         )
 
     @classmethod
-    def from_file(cls, path: str | Path) -> "WorkflowDefinition":
+    def from_file(cls, path: str | Path) -> WorkflowDefinition:
         return cls.from_dict(_load_document(Path(path)))
 
     def build(self, execution_id: str) -> list[Task]:
@@ -123,8 +128,10 @@ class WorkflowDefinition:
                 raise ConfigurationError(
                     f"workflow {self.id}: router requires a classification step"
                 )
-            routes = {
-                name: [_step_from_dict(s) for s in route_steps]
+            # Keys come from configuration, so they are coerced rather than
+            # trusted to already be strings.
+            routes: dict[str, Sequence[Step]] = {
+                str(name): [_step_from_dict(s) for s in route_steps]
                 for name, route_steps in (options.get("routes") or {}).items()
             }
             if not routes:
@@ -210,12 +217,12 @@ class WorkflowRegistry:
     def list(self) -> list[WorkflowDefinition]:
         return sorted(self._by_key.values(), key=lambda d: (d.id, d.version))
 
-    def versions(self, workflow_id: str) -> list[str]:
+    def versions(self, workflow_id: str) -> builtins.list[str]:
         return sorted(
             (v for (wid, v) in self._by_key if wid == workflow_id), key=_version_key
         )
 
-    def load_directory(self, directory: str | Path) -> list[WorkflowDefinition]:
+    def load_directory(self, directory: str | Path) -> builtins.list[WorkflowDefinition]:
         path = Path(directory)
         if not path.is_dir():
             return []
@@ -225,7 +232,9 @@ class WorkflowRegistry:
                 loaded.append(self.register(WorkflowDefinition.from_file(file)))
         return loaded
 
-    def load_all(self, directories: Iterable[str | Path]) -> list[WorkflowDefinition]:
+    def load_all(
+        self, directories: Iterable[str | Path]
+    ) -> builtins.list[WorkflowDefinition]:
         loaded: list[WorkflowDefinition] = []
         for directory in directories:
             loaded.extend(self.load_directory(directory))
