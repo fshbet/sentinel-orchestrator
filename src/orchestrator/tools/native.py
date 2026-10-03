@@ -166,7 +166,23 @@ def _persist_artifact(artifact: Any, context: ToolContext) -> Path | None:
 
     try:
         directory.mkdir(parents=True, exist_ok=True)
-        target = _unique_target(directory, safe_artifact_filename(artifact.name), payload)
+        filename = safe_artifact_filename(artifact.name)
+
+        # Refused here, before _unique_target, and not only afterwards.
+        # _unique_target treats an existing file whose bytes differ as a
+        # collision and picks a versioned name, which steps around a planted
+        # link instead of reporting it. The write does stay inside the store,
+        # so nothing escapes - but the call is reported as successful while
+        # the name the agent published still points somewhere else, and the
+        # next reader of `out.html` follows the link. A refusal is the only
+        # honest answer, so it has to come before the collision logic.
+        if (directory / filename).is_symlink():
+            raise ArtifactPersistenceError(
+                "artifact path is a symbolic link and was not written",
+                artifact_name=artifact.name,
+            )
+
+        target = _unique_target(directory, filename, payload)
 
         # Defence in depth. safe_artifact_filename already reduces the name to
         # a single component, but the check is cheap and the consequence of a
