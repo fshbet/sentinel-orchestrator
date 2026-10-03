@@ -50,6 +50,11 @@ mcp:
 
 `transport` is inferred: `command` means stdio, `url` means streamable HTTP.
 
+On Windows, `npx` and `uvx` are shell shims rather than executables, so the
+command is `npx.cmd` / `uvx.cmd`. Given the bare name the server is reported as
+disconnected with "cannot find the file specified", which looks like a missing
+package and is not one.
+
 ```bash
 orchestrator mcp
 ```
@@ -165,7 +170,9 @@ operations are gated because answering an approval on a human's behalf is
 exactly the kind of administrative action that should require an explicit
 decision to expose.
 
-Register it with an MCP client the usual way:
+Register it with an MCP client the usual way. [`.mcp.json`](.mcp.json) in the
+repository root already does this, so a client that reads project-level MCP
+configuration — Claude Code among them — finds the server without further setup:
 
 ```json
 {
@@ -177,6 +184,15 @@ Register it with an MCP client the usual way:
   }
 }
 ```
+
+The client launches that command with whatever environment it inherits, so the
+project has to be installed and on the path — `pip install -e ".[cli]"` with the
+virtualenv active. An editor started outside the environment will report the
+server as failed to start, and that is why.
+
+To expose the control tools as well, add `"--allow-control"` to `args`. It is
+left off by default: answering a human's approval on their behalf is not
+something a client should acquire by opening a folder.
 
 ---
 

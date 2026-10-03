@@ -6,6 +6,9 @@ over stdio. Nothing about the transport or the framing is mocked.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from conftest import build_platform, planning_model, run
 
@@ -19,7 +22,6 @@ from orchestrator.mcp.registry import MCPRegistry
 from orchestrator.mcp.server import OrchestrationMCPServer
 from orchestrator.observability.audit import AuditLog, NullAuditSink
 from orchestrator.tools.registry import ToolContext, ToolRegistry
-
 
 # -- client ----------------------------------------------------------------
 
@@ -356,3 +358,68 @@ def test_server_reports_tool_errors_as_results_not_crashes():
 
     response = run(scenario())
     assert response["result"]["isError"] is True
+
+
+# -- shipped wiring --------------------------------------------------------
+#
+# The repository ships two pieces of MCP configuration: `.mcp.json`, which
+# registers this project as a server for clients that read project-level MCP
+# config, and the `mcp:` block in examples/config.development.yaml, which
+# connects servers the other way. Both are configuration rather than code, so
+# nothing else would notice them drifting from the thing they point at.
+
+
+def _repo_root():
+    return Path(__file__).resolve().parent.parent
+
+
+def test_the_shipped_mcp_json_names_a_command_the_cli_has():
+    """A typo here surfaces as "server failed to start" inside a client."""
+    pytest.importorskip("typer")
+    from orchestrator.cli.main import app
+
+    config = json.loads((_repo_root() / ".mcp.json").read_text(encoding="utf-8"))
+    entry = config["mcpServers"]["orchestrator"]
+
+    commands = {
+        command.name or command.callback.__name__.replace("_", "-")
+        for command in app.registered_commands
+        if command.name or command.callback
+    }
+    assert entry["args"][0] in commands
+
+
+def test_the_shipped_mcp_json_stays_read_only():
+    """The default must not hand a client the control tools.
+
+    Answering a human's approval on their behalf is not something an editor
+    should acquire by opening a folder, so --allow-control is opt-in. This
+    pins that decision rather than leaving it to whoever edits the file next.
+    """
+    config = json.loads((_repo_root() / ".mcp.json").read_text(encoding="utf-8"))
+    entry = config["mcpServers"]["orchestrator"]
+    assert "--allow-control" not in entry["args"]
+
+
+def test_example_mcp_policies_refer_to_configured_servers():
+    """A policy for a server that is not configured is silently ignored.
+
+    That is the dangerous direction to be wrong in: the policy looks present,
+    the ceiling it describes is never applied, and nothing reports it.
+    """
+    yaml = pytest.importorskip("yaml")
+
+    document = yaml.safe_load(
+        (_repo_root() / "examples" / "config.development.yaml").read_text(encoding="utf-8")
+    )
+    block = document["mcp"]
+    servers = block["servers"] or {}
+    assert servers, "the example should show at least one connected server"
+
+    for policy in block["policies"] or []:
+        assert policy["server"] in servers, policy["server"]
+
+    for server_id, spec in servers.items():
+        # Transport is inferred from which key is present; neither means the
+        # server cannot be started at all.
+        assert spec.get("command") or spec.get("url"), server_id
