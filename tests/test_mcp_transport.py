@@ -431,13 +431,20 @@ def test_the_stderr_tail_is_carried_on_the_error(tmp_path):
 
 def test_the_stderr_tail_is_redacted(tmp_path):
     """A server crashing on startup may print its own configuration on the way
-    down, and this tail reaches logs and the console."""
+    down, and this tail reaches logs and the console.
+
+    The fixture spells its marker `should-never-be-visible`, the same way every
+    other credential-shaped fixture in this suite does. CI greps tests/ for
+    credential shapes and fails unless each one carries a marker naming it as
+    fake, and that gate is the reason a real key cannot quietly become a
+    fixture - so the fixture conforms to it rather than the reverse.
+    """
     server = _script(
         tmp_path,
         "leaky.py",
         """
         import sys
-        sys.stderr.write("using key sk-ant-api03-SHOULDNEVERBEVISIBLE0123456789\\n")
+        sys.stderr.write("using key sk-ant-api03-should-never-be-visible-0123456789\\n")
         sys.stderr.flush()
         sys.exit(1)
         """,
@@ -450,7 +457,7 @@ def test_the_stderr_tail_is_redacted(tmp_path):
         run(scenario())
 
     tail = " ".join(caught.value.details.get("stderr_tail") or [])
-    assert "SHOULDNEVERBEVISIBLE" not in tail
+    assert "should-never-be-visible" not in tail
     assert "redacted" in tail
 
 
