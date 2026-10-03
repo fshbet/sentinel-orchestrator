@@ -186,9 +186,27 @@ configuration — Claude Code among them — finds the server without further se
 ```
 
 The client launches that command with whatever environment it inherits, so the
-project has to be installed and on the path — `pip install -e ".[cli]"` with the
-virtualenv active. An editor started outside the environment will report the
-server as failed to start, and that is why.
+project has to be installed and on the path, with the virtualenv active:
+
+```bash
+pip install -e ".[cli,yaml]"
+```
+
+`yaml` is not optional for this. `mcp-serve` builds the platform, and building
+it reads the workflow definitions that ship with the repository — those are
+YAML, so without PyYAML the server exits before it speaks a word, reporting a
+missing dependency for a subsystem you were not thinking about.
+
+| You want | Install |
+|---|---|
+| `orchestrator mcp-serve`, and the CLI generally | `".[cli,yaml]"` |
+| the REST API and web console (`orchestrator serve`) | add `api` |
+| MCP servers reached over HTTP rather than stdio | add `http` |
+| PostgreSQL instead of SQLite | add `postgres` |
+| running the test suite | add `dev` |
+
+An editor started outside that environment will report the server as failed to
+start, and that is why.
 
 To expose the control tools as well, add `"--allow-control"` to `args`. It is
 left off by default: answering a human's approval on their behalf is not

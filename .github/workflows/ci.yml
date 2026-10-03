@@ -199,7 +199,13 @@ jobs:
       - name: Build
         run: docker build -t orchestrator:scan .
       - name: Scan the image
-        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0  # v0.29.0
+        # v0.29.0 could never run. Pinning this action by SHA does not pin what
+        # the action itself uses, and v0.29.0's action.yaml references
+        # `aquasecurity/setup-trivy@v0.2.2` — a tag since deleted upstream, so
+        # every run died at "Set up job" with "unable to find version v0.2.2".
+        # v0.31.0 onwards reference setup-trivy by SHA instead, which cannot be
+        # deleted from under us. Thresholds below are unchanged.
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8  # v0.33.1
         with:
           image-ref: orchestrator:scan
           severity: HIGH,CRITICAL
