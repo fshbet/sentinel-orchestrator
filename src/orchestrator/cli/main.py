@@ -486,10 +486,17 @@ if typer is not None:
                 _echo(
                     f"  registered {', '.join(server.get('tools_registered', [])) or '-'}"
                 )
+                if server.get("explicit_policy") is False:
+                    _echo("  policy     default (no policy block names this server)")
                 for denied in server.get("tools_denied", []):
                     _echo(f"  DENIED     {denied['tool']}: {denied['reason'][:80]}")
                 if server.get("error"):
                     _echo(f"  error      {server['error']}")
+                # A server that died on startup usually explains itself on
+                # stderr. Printing only the connection error buries the one
+                # useful fact.
+                for line in server.get("stderr_tail", []):
+                    _echo(f"  stderr     {line[:160]}")
 
         _emit(_run(main()), as_json, render)
 

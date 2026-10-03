@@ -50,10 +50,12 @@ mcp:
 
 `transport` is inferred: `command` means stdio, `url` means streamable HTTP.
 
-On Windows, `npx` and `uvx` are shell shims rather than executables, so the
-command is `npx.cmd` / `uvx.cmd`. Given the bare name the server is reported as
-disconnected with "cannot find the file specified", which looks like a missing
-package and is not one.
+`command` is written the way you would type it — `npx`, `uvx`, `python` — on
+every platform. The transport resolves it with `shutil.which` before spawning,
+so the Windows `.cmd` and `.exe` shims are found without the configuration
+naming them. Absolute paths are passed through unchanged. A command that is on
+no PATH is refused before a process is started, with the name you configured in
+the error rather than a bare "file not found".
 
 ```bash
 orchestrator mcp

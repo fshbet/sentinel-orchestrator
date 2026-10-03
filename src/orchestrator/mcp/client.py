@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..errors import MCPError, MCPProtocolError
+from ..observability.logging import redact_text
 from .transport import Transport, TransportInfo, open_transport
 
 # Newest first. The first entry is what the client proposes.
@@ -31,6 +32,27 @@ SUPPORTED_PROTOCOL_VERSIONS = (
 )
 
 CLIENT_INFO = {"name": "universal-orchestrator", "version": "0.1.0"}
+
+
+def _attach_stderr(error: BaseException, transport: Transport) -> None:
+    """Record the server's last words on the error about to be raised.
+
+    A child that dies during startup usually says why on stderr, and the
+    transport is the only thing holding those lines. It is about to be closed
+    and dropped, so the tail is copied onto the error first. Lines are redacted
+    and truncated, because a server crashing on startup may well print its own
+    configuration on the way down.
+    """
+    details = getattr(error, "details", None)
+    if not isinstance(details, dict) or details.get("stderr_tail"):
+        return
+    try:
+        tail = transport.info().detail.get("stderr_tail") or []
+    except Exception:  # noqa: BLE001 - diagnostics must never replace the fault
+        return
+    lines = [redact_text(str(line))[:200] for line in tail if str(line).strip()]
+    if lines:
+        details["stderr_tail"] = lines[-5:]
 
 
 @dataclass
@@ -152,7 +174,23 @@ class MCPClient:
         client = cls(
             server_id, transport, timeout=float(config.get("timeout", 60.0)), **kwargs
         )
-        await client.initialize()
+        try:
+            await client.initialize()
+        except BaseException as exc:
+            # The transport owns a child process and two pipes. Without this,
+            # a server that starts but never finishes initialising leaves both
+            # alive for the lifetime of the orchestrator - which for `serve` is
+            # indefinitely. BaseException so a cancellation cleans up too.
+            #
+            # Whatever the server wrote to stderr is usually the one useful
+            # fact about why it would not start, and it is about to be thrown
+            # away with the transport, so it is attached to the error first.
+            _attach_stderr(exc, transport)
+            try:
+                await transport.close()
+            except Exception:  # noqa: BLE001, S110 - the original error is what matters
+                pass
+            raise
         return client
 
     async def initialize(self) -> dict[str, Any]:

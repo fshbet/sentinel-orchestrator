@@ -218,9 +218,9 @@ mcp:
   # Run `orchestrator mcp` after editing this to see what connected, what each
   # server offered, and which of its tools were refused and why.
   servers:
-    # On Windows the executable is `npx.cmd`; `npx` alone is a shell shim that
-    # CreateProcess cannot find, and the server is reported as disconnected
-    # with "cannot find the file specified". Same for `uvx.cmd`.
+    # `command` is written the way you would type it, on every platform. The
+    # transport resolves it with shutil.which before spawning, so the Windows
+    # .cmd and .exe shims are found without this file naming them.
     filesystem:
       command: npx
       args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
