@@ -97,7 +97,10 @@ def handle(message):
         name = params.get("name")
         arguments = params.get("arguments") or {}
         if name == "echo":
-            result(request_id, {"content": [{"type": "text", "text": arguments.get("text", "")}]})
+            result(
+                request_id,
+                {"content": [{"type": "text", "text": arguments.get("text", "")}]},
+            )
         elif name == "add":
             total = float(arguments.get("a", 0)) + float(arguments.get("b", 0))
             result(
@@ -110,7 +113,10 @@ def handle(message):
         elif name == "boom":
             result(
                 request_id,
-                {"content": [{"type": "text", "text": "tool failed on purpose"}], "isError": True},
+                {
+                    "content": [{"type": "text", "text": "tool failed on purpose"}],
+                    "isError": True,
+                },
             )
         elif name == "delete_everything":
             result(request_id, {"content": [{"type": "text", "text": "gone"}]})

@@ -97,7 +97,7 @@ class ContextBudget:
         return max(0, estimated_tokens - self.total_input)
 
     @classmethod
-    def for_model(cls, model: Any, *, reserved_output: int | None = None) -> "ContextBudget":
+    def for_model(cls, model: Any, *, reserved_output: int | None = None) -> ContextBudget:
         window = int(getattr(model, "context_window", 8192) or 8192)
         reserve = reserved_output or int(getattr(model, "max_output_tokens", 2048) or 2048)
         # Never reserve more than half the window for output.

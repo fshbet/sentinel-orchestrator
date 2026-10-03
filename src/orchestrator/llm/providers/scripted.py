@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import inspect
 import json
-from typing import Any, Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any
 
 from ...core.domain.enums import ModelCapability
 from ...core.domain.models import ModelSpec, Usage
@@ -81,9 +82,7 @@ class ScriptedProvider(LLMProvider):
     def queue(self, *responses: Any) -> None:
         self._script.extend(responses)
 
-    async def generate(
-        self, request: CompletionRequest, model: ModelSpec
-    ) -> ModelResponse:
+    async def generate(self, request: CompletionRequest, model: ModelSpec) -> ModelResponse:
         self.calls.append(request)
         if not self._script:
             raise ModelError("scripted provider has no responses queued")
@@ -165,9 +164,7 @@ class CallableProvider(LLMProvider):
     def models(self) -> list[ModelSpec]:
         return list(self._models)
 
-    async def generate(
-        self, request: CompletionRequest, model: ModelSpec
-    ) -> ModelResponse:
+    async def generate(self, request: CompletionRequest, model: ModelSpec) -> ModelResponse:
         result = self._fn(request)
         if inspect.isawaitable(result):
             result = await result

@@ -72,11 +72,11 @@ KNOWN_METHODS = READ_METHODS + WRITE_METHODS
 # link-local check so that a deployment which legitimately needs link-local
 # still cannot reach these.
 CLOUD_METADATA_ADDRESSES = (
-    "169.254.169.254",   # AWS, Azure, GCP, DigitalOcean, OpenStack
-    "169.254.170.2",     # AWS ECS task metadata
-    "100.100.100.200",   # Alibaba Cloud
-    "192.0.0.192",       # Oracle Cloud
-    "fd00:ec2::254",     # AWS IMDSv2 over IPv6
+    "169.254.169.254",  # AWS, Azure, GCP, DigitalOcean, OpenStack
+    "169.254.170.2",  # AWS ECS task metadata
+    "100.100.100.200",  # Alibaba Cloud
+    "192.0.0.192",  # Oracle Cloud
+    "fd00:ec2::254",  # AWS IMDSv2 over IPv6
 )
 
 # Hostnames that resolve to metadata services. Blocked by name as well as by
@@ -89,9 +89,9 @@ CLOUD_METADATA_HOSTNAMES = (
 
 _CGNAT = ipaddress.ip_network("100.64.0.0/10")
 _DOCUMENTATION_V4 = (
-    ipaddress.ip_network("192.0.2.0/24"),      # TEST-NET-1
-    ipaddress.ip_network("198.51.100.0/24"),   # TEST-NET-2
-    ipaddress.ip_network("203.0.113.0/24"),    # TEST-NET-3
+    ipaddress.ip_network("192.0.2.0/24"),  # TEST-NET-1
+    ipaddress.ip_network("198.51.100.0/24"),  # TEST-NET-2
+    ipaddress.ip_network("203.0.113.0/24"),  # TEST-NET-3
 )
 _DOCUMENTATION_V6 = (ipaddress.ip_network("2001:db8::/32"),)
 
@@ -124,8 +124,11 @@ def classify_address(address: str) -> str | None:
 
     # Before the private/reserved tests: Python marks the documentation
     # ranges private, which is true but tells an operator nothing useful.
-    if any(ip in net for net in (_DOCUMENTATION_V4 + _DOCUMENTATION_V6)
-           if ip.version == net.version):
+    if any(
+        ip in net
+        for net in (_DOCUMENTATION_V4 + _DOCUMENTATION_V6)
+        if ip.version == net.version
+    ):
         return "reserved"
 
     if ip.is_unspecified:
@@ -265,7 +268,10 @@ class EgressPolicy:
     def blocked_categories(self) -> set[str]:
         """Which address categories this policy refuses."""
         blocked: set[str] = {
-            "unparseable", "unspecified", "multicast", "reserved",
+            "unparseable",
+            "unspecified",
+            "multicast",
+            "reserved",
             "carrier_grade_nat",
         }
         if not self.allow_loopback:
@@ -309,8 +315,7 @@ def validate_url(url: str, policy: EgressPolicy) -> Target:
     parsed = urlparse(url or "")
     if parsed.scheme not in ("http", "https"):
         raise PermissionDenied(
-            f"scheme {parsed.scheme or '(none)'} is not supported; only http "
-            f"and https are",
+            f"scheme {parsed.scheme or '(none)'} is not supported; only http and https are",
             scheme=parsed.scheme,
         )
     if parsed.scheme == "http" and not policy.allow_http:
@@ -331,8 +336,7 @@ def validate_url(url: str, policy: EgressPolicy) -> Target:
 
     if host in CLOUD_METADATA_HOSTNAMES and not policy.allow_cloud_metadata:
         raise PermissionDenied(
-            f"{host} is a cloud metadata hostname and is never a permitted "
-            f"destination",
+            f"{host} is a cloud metadata hostname and is never a permitted destination",
             host=host,
             category="cloud_metadata",
         )
@@ -392,9 +396,7 @@ def resolve_and_validate(url: str, policy: EgressPolicy) -> Target:
         ) from exc
 
     if not addresses:
-        raise PermissionDenied(
-            f"{target.host} resolved to no addresses", host=target.host
-        )
+        raise PermissionDenied(f"{target.host} resolved to no addresses", host=target.host)
 
     blocked = policy.blocked_categories()
     for address in addresses:

@@ -39,7 +39,6 @@ from orchestrator.core.state.store import ConcurrentModification
 from orchestrator.errors import InvalidStateTransition, NotFound
 from orchestrator.observability.audit import AuditLog
 
-
 # -- domain model ----------------------------------------------------------
 
 
@@ -91,19 +90,11 @@ def test_usage_addition_is_pure():
 
 def test_invalid_execution_transitions_are_rejected():
     # The invariant that matters: nothing reaches COMPLETED except via REVIEWING.
-    assert not can_transition_execution(
-        ExecutionStatus.RUNNING, ExecutionStatus.COMPLETED
-    )
-    assert not can_transition_execution(
-        ExecutionStatus.READY, ExecutionStatus.COMPLETED
-    )
-    assert can_transition_execution(
-        ExecutionStatus.REVIEWING, ExecutionStatus.COMPLETED
-    )
+    assert not can_transition_execution(ExecutionStatus.RUNNING, ExecutionStatus.COMPLETED)
+    assert not can_transition_execution(ExecutionStatus.READY, ExecutionStatus.COMPLETED)
+    assert can_transition_execution(ExecutionStatus.REVIEWING, ExecutionStatus.COMPLETED)
     with pytest.raises(InvalidStateTransition):
-        assert_execution_transition(
-            ExecutionStatus.CREATED, ExecutionStatus.COMPLETED
-        )
+        assert_execution_transition(ExecutionStatus.CREATED, ExecutionStatus.COMPLETED)
 
 
 def test_terminal_execution_states_have_no_exits():

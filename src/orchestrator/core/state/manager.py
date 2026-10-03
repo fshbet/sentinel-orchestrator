@@ -208,9 +208,7 @@ class StateManager:
             )
         if approval.status is not ApprovalStatus.PENDING:
             return execution
-        approval.status = (
-            ApprovalStatus.APPROVED if approved else ApprovalStatus.REJECTED
-        )
+        approval.status = ApprovalStatus.APPROVED if approved else ApprovalStatus.REJECTED
         approval.response = response
         approval.responder = responder
         approval.resolved_at = utcnow()

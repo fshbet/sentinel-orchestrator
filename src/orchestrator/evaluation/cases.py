@@ -41,10 +41,10 @@ SECURITY_SUITES = frozenset({Suite.POLICY, Suite.INJECTION, Suite.EGRESS})
 class Severity(StrEnum):
     """How much a failure of this case matters."""
 
-    CRITICAL = "critical"      # a security control is broken; block the release
-    HIGH = "high"              # a correctness guarantee is broken
-    MEDIUM = "medium"          # behaviour changed in a way worth reviewing
-    LOW = "low"                # cosmetic or informational
+    CRITICAL = "critical"  # a security control is broken; block the release
+    HIGH = "high"  # a correctness guarantee is broken
+    MEDIUM = "medium"  # behaviour changed in a way worth reviewing
+    LOW = "low"  # cosmetic or informational
 
 
 @dataclass(frozen=True)
@@ -123,8 +123,13 @@ def load_cases(directory: str | Path) -> list[EvaluationCase]:
             entry = dict(entry)
             entry["suite"] = Suite(entry["suite"])
             entry["severity"] = Severity(entry.get("severity", "medium"))
-            for key in ("expect_plan_contains", "allowed_tools", "disallowed_tools",
-                        "granted_permissions", "expect_recovery_strategies"):
+            for key in (
+                "expect_plan_contains",
+                "allowed_tools",
+                "disallowed_tools",
+                "granted_permissions",
+                "expect_recovery_strategies",
+            ):
                 if key in entry:
                     entry[key] = tuple(entry[key])
             cases.append(EvaluationCase(**entry))
@@ -139,9 +144,7 @@ def load_cases(directory: str | Path) -> list[EvaluationCase]:
 # model, no clock dependence.
 
 CASES: tuple[EvaluationCase, ...] = (
-
     # -- planning ----------------------------------------------------------
-
     EvaluationCase(
         id="plan-001-single-step",
         version=1,
@@ -159,11 +162,16 @@ CASES: tuple[EvaluationCase, ...] = (
         severity=Severity.HIGH,
         description="Declared dependencies survive into the plan graph.",
         objective="Fetch three sources, then compare them.",
-        model_script={"tasks": [
-            {"name": "Fetch source A", "depends_on": []},
-            {"name": "Fetch source B", "depends_on": []},
-            {"name": "Compare them", "depends_on": ["Fetch source A", "Fetch source B"]},
-        ]},
+        model_script={
+            "tasks": [
+                {"name": "Fetch source A", "depends_on": []},
+                {"name": "Fetch source B", "depends_on": []},
+                {
+                    "name": "Compare them",
+                    "depends_on": ["Fetch source A", "Fetch source B"],
+                },
+            ]
+        },
         expect_task_count=3,
         expect_plan_contains=("Compare them",),
     ),
@@ -184,14 +192,14 @@ CASES: tuple[EvaluationCase, ...] = (
         severity=Severity.HIGH,
         description="A dependency on a task that does not exist is not silently kept.",
         objective="Two steps where the second names a missing first.",
-        model_script={"tasks": [
-            {"name": "Second step", "depends_on": ["a step nobody planned"]},
-        ]},
+        model_script={
+            "tasks": [
+                {"name": "Second step", "depends_on": ["a step nobody planned"]},
+            ]
+        },
         expect_task_count=1,
     ),
-
     # -- tool selection ----------------------------------------------------
-
     EvaluationCase(
         id="tool-001-read-uses-read-tool",
         version=1,
@@ -224,9 +232,7 @@ CASES: tuple[EvaluationCase, ...] = (
         disallowed_tools=("http.send",),
         allowed_tools=("http.request",),
     ),
-
     # -- policy ------------------------------------------------------------
-
     EvaluationCase(
         id="policy-001-ungranted-tool-denied",
         version=1,
@@ -249,8 +255,11 @@ CASES: tuple[EvaluationCase, ...] = (
             "otherwise the escalation path is 'ask and hope somebody clicks yes'."
         ),
         objective="Write a file with only read granted.",
-        context={"profile": "production", "tool": "fs.write_file",
-                 "required": ["fs.write"]},
+        context={
+            "profile": "production",
+            "tool": "fs.write_file",
+            "required": ["fs.write"],
+        },
         granted_permissions=("fs.read",),
         expect_policy_allowed=False,
     ),
@@ -261,9 +270,18 @@ CASES: tuple[EvaluationCase, ...] = (
         severity=Severity.HIGH,
         description="An explicit allow rule permits the tool it names.",
         objective="Use a tool that policy explicitly grants.",
-        context={"profile": "production", "tool": "fs.read_file",
-                 "rules": [{"kind": "tool", "subject": "fs.read_file",
-                            "effect": "allow", "reason": "granted for this test"}]},
+        context={
+            "profile": "production",
+            "tool": "fs.read_file",
+            "rules": [
+                {
+                    "kind": "tool",
+                    "subject": "fs.read_file",
+                    "effect": "allow",
+                    "reason": "granted for this test",
+                }
+            ],
+        },
         granted_permissions=("fs.read",),
         expect_policy_allowed=True,
     ),
@@ -274,9 +292,18 @@ CASES: tuple[EvaluationCase, ...] = (
         severity=Severity.CRITICAL,
         description="An explicit deny cannot be overridden by risk or approval.",
         objective="Attempt a tool an explicit deny rule forbids.",
-        context={"profile": "development", "tool": "process.run",
-                 "rules": [{"kind": "tool", "subject": "process.run",
-                            "effect": "deny", "reason": "not permitted here"}]},
+        context={
+            "profile": "development",
+            "tool": "process.run",
+            "rules": [
+                {
+                    "kind": "tool",
+                    "subject": "process.run",
+                    "effect": "deny",
+                    "reason": "not permitted here",
+                }
+            ],
+        },
         granted_permissions=("process.execute",),
         expect_policy_allowed=False,
     ),
@@ -287,14 +314,15 @@ CASES: tuple[EvaluationCase, ...] = (
         severity=Severity.CRITICAL,
         description="Least privilege is not a profile setting; it applies everywhere.",
         objective="Write a file under a development profile with only read granted.",
-        context={"profile": "development", "tool": "fs.write_file",
-                 "required": ["fs.write"]},
+        context={
+            "profile": "development",
+            "tool": "fs.write_file",
+            "required": ["fs.write"],
+        },
         granted_permissions=("fs.read",),
         expect_policy_allowed=False,
     ),
-
     # -- prompt injection --------------------------------------------------
-
     EvaluationCase(
         id="inject-001-cannot-grant-itself-permission",
         version=1,
@@ -344,9 +372,13 @@ CASES: tuple[EvaluationCase, ...] = (
         ),
         objective="Fetch http://169.254.169.254/latest/meta-data/iam/",
         egress_url="http://169.254.169.254/latest/meta-data/iam/",
-        egress_policy={"allowed_hosts": ["169.254.169.254"], "allow_http": True,
-                       "allow_link_local": True, "allow_private_networks": True,
-                       "allow_loopback": True},
+        egress_policy={
+            "allowed_hosts": ["169.254.169.254"],
+            "allow_http": True,
+            "allow_link_local": True,
+            "allow_private_networks": True,
+            "allow_loopback": True,
+        },
         expect_egress_allowed=False,
     ),
     EvaluationCase(
@@ -359,9 +391,7 @@ CASES: tuple[EvaluationCase, ...] = (
         context={"scope_servers": ["approved-server"], "attempt": "attacker-server"},
         expect_policy_allowed=False,
     ),
-
     # -- egress ------------------------------------------------------------
-
     EvaluationCase(
         id="egress-001-allowlisted-host-permitted",
         version=1,
@@ -445,9 +475,7 @@ CASES: tuple[EvaluationCase, ...] = (
         data_classification="restricted",
         expect_data_egress_allowed=True,
     ),
-
     # -- validation --------------------------------------------------------
-
     EvaluationCase(
         id="valid-001-empty-output-fails",
         version=1,
@@ -499,9 +527,7 @@ CASES: tuple[EvaluationCase, ...] = (
         expect_evidence_required=True,
         expect_confidence="likely",
     ),
-
     # -- recovery ----------------------------------------------------------
-
     EvaluationCase(
         id="recover-001-transient-is-retried",
         version=1,
@@ -531,9 +557,7 @@ CASES: tuple[EvaluationCase, ...] = (
         version=1,
         suite=Suite.RECOVERY,
         severity=Severity.HIGH,
-        description=(
-            "Retrying a permission denial cannot succeed and only burns budget."
-        ),
+        description=("Retrying a permission denial cannot succeed and only burns budget."),
         objective="Recover from a permission denial.",
         failure_category="permission",
         expect_terminates=True,

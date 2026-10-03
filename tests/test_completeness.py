@@ -11,6 +11,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import textwrap
+from datetime import UTC
 from pathlib import Path
 
 import pytest
@@ -45,7 +46,6 @@ from orchestrator.observability.audit import AuditLog, NullAuditSink
 from orchestrator.platform import Orchestrator
 from orchestrator.tools.registry import ToolContext, ToolRegistry
 
-
 # --------------------------------------------------------------------------
 # Router branch pruning (spec section 5)
 # --------------------------------------------------------------------------
@@ -57,7 +57,10 @@ def _router_platform(decision):
     def model(request):
         system = request.system or ""
         if "extract structured requirements" in system:
-            return {"explicit": ["route the work"], "success_criteria": [{"description": "d"}]}
+            return {
+                "explicit": ["route the work"],
+                "success_criteria": [{"description": "d"}],
+            }
         if "decompose an objective" in system:
             return {"tasks": [{"key": "x", "name": "x", "objective": "placeholder"}]}
         body = request.messages[0].content
@@ -75,16 +78,22 @@ async def _run_router(decision):
 
     tasks = router(
         execution.id,
-        Step(name="classify", objective="Choose a route.", validations=[
-            ValidationSpec(validator="non_empty")
-        ]),
+        Step(
+            name="classify",
+            objective="Choose a route.",
+            validations=[ValidationSpec(validator="non_empty")],
+        ),
         {
             "left": [Step(name="left work", objective="Do the left work.")],
             "right": [Step(name="right work", objective="Do the right work.")],
         },
     )
-    plan = Plan(execution_id=execution.id, version=1, tasks=tasks,
-                pattern=OrchestrationPattern.ROUTER)
+    plan = Plan(
+        execution_id=execution.id,
+        version=1,
+        tasks=tasks,
+        pattern=OrchestrationPattern.ROUTER,
+    )
     platform.engine._adopt(execution, plan)
     from orchestrator.core.domain.enums import ExecutionStatus as _S
 
@@ -135,8 +144,8 @@ def test_an_undecidable_route_is_reported_rather_than_guessed():
 
 
 def _handoff_platform(target, *, agents=None):
-    from orchestrator.llm.base import ModelResponse
     from orchestrator.core.domain.models import Usage
+    from orchestrator.llm.base import ModelResponse
 
     state = {"handed": False}
 
@@ -145,7 +154,9 @@ def _handoff_platform(target, *, agents=None):
         if "extract structured requirements" in system:
             return {"explicit": ["work"], "success_criteria": [{"description": "d"}]}
         if "decompose an objective" in system:
-            return {"tasks": [{"key": "a", "name": "starter", "objective": "Begin the work."}]}
+            return {
+                "tasks": [{"key": "a", "name": "starter", "objective": "Begin the work."}]
+            }
         if not state["handed"]:
             state["handed"] = True
             return ModelResponse(
@@ -177,7 +188,6 @@ def test_a_handoff_appends_a_follow_on_task():
         await platform.engine._plan(execution)
 
         # The runtime reports the handoff; the orchestrator decides on it.
-        task = next(iter(execution.tasks.values()))
         original_validate = platform.engine._validate_task
 
         async def validate(execution_, task_, scope):
@@ -218,7 +228,10 @@ def test_a_handoff_to_something_unregistered_is_refused():
     execution, events = run(scenario())
     assert len(execution.tasks) == 1  # nothing appended
     refusals = [e for e in events if e.type == "handoff.refused"]
-    assert refusals and "neither a registered agent nor capability" in refusals[0].payload["reason"]
+    assert (
+        refusals
+        and "neither a registered agent nor capability" in refusals[0].payload["reason"]
+    )
 
 
 def test_a_handoff_chain_is_bounded():
@@ -238,7 +251,11 @@ def test_a_handoff_chain_is_bounded():
 
     execution, events = run(scenario())
     assert len(execution.tasks) == 1
-    assert any("limit" in e.payload.get("reason", "") for e in events if e.type == "handoff.refused")
+    assert any(
+        "limit" in e.payload.get("reason", "")
+        for e in events
+        if e.type == "handoff.refused"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -256,7 +273,9 @@ def test_a_task_can_run_its_own_child_execution():
         if "decompose an objective" in system:
             body = request.messages[0].content
             depth_seen["objectives"].append(body.split("\n")[1] if "\n" in body else body)
-            return {"tasks": [{"key": "a", "name": "inner", "objective": "Do the inner work."}]}
+            return {
+                "tasks": [{"key": "a", "name": "inner", "objective": "Do the inner work."}]
+            }
         return "work done"
 
     async def scenario():
@@ -322,8 +341,8 @@ def test_nesting_depth_is_bounded():
 
 
 def test_a_child_budget_is_carved_out_of_the_parent():
-    from orchestrator.core.execution.nested import SubOrchestrationRuntime
     from orchestrator.core.domain.models import ResourceLimits, Usage
+    from orchestrator.core.execution.nested import SubOrchestrationRuntime
 
     async def scenario():
         platform = await build_platform(planning_model())
@@ -370,8 +389,8 @@ def test_an_agent_scoped_to_one_mcp_server_cannot_reach_another():
     registry = _mcp_tool_registry()
     scope = PermissionScope(
         permissions=("mcp.invoke",),
-        tools=("mcp.*",),          # broad on tools
-        mcp_servers=("alpha",),    # narrow on servers
+        tools=("mcp.*",),  # broad on tools
+        mcp_servers=("alpha",),  # narrow on servers
     )
 
     visible = {spec.id for spec in registry.for_scope(scope)}
@@ -775,7 +794,7 @@ def test_skills_are_versioned_and_immutable_per_version():
     registry.register(Skill(id="s", version="1.0.0", content="first"))
     registry.register(Skill(id="s", version="2.0.0", content="second"))
 
-    assert registry.get("s").version == "2.0.0"       # latest by default
+    assert registry.get("s").version == "2.0.0"  # latest by default
     assert registry.get("s", "1.0.0").content == "first"  # pinned still available
     assert registry.versions("s") == ["1.0.0", "2.0.0"]
 
@@ -889,7 +908,7 @@ def test_skills_load_from_a_directory():
         loaded = registry.load_directory(path)
 
     ids = {s.id for s in loaded}
-    assert ids == {"evidence", "structured"}   # id falls back to the filename
+    assert ids == {"evidence", "structured"}  # id falls back to the filename
     assert registry.get("evidence").description == "Cite before concluding."
 
 
@@ -950,8 +969,8 @@ def test_ordinary_output_is_left_alone():
 
     for payload in (
         "The groups are cli, api and dev.",
-        '{"groups": ["cli", "api"]}',           # a legitimate JSON answer
-        '{"name": "something"}',                 # a name with no arguments is prose
+        '{"groups": ["cli", "api"]}',  # a legitimate JSON answer
+        '{"name": "something"}',  # a name with no arguments is prose
         "",
     ):
         text, calls = recover(payload, offered_tools=["fs.read_file"])
@@ -1044,7 +1063,7 @@ def test_the_goal_analyzer_normalises_null_shaped_validator_names():
     data = {
         "explicit": ["do it"],
         "success_criteria": [
-            {"description": "a", "validator": "null"},      # the string, not null
+            {"description": "a", "validator": "null"},  # the string, not null
             {"description": "b", "validator": "None"},
             {"description": "c", "validator": "invented_checker"},
             {"description": "d", "validator": "non_empty"},
@@ -1130,7 +1149,7 @@ def test_colliding_tool_names_stay_distinguishable():
 
 
 def test_an_over_long_tool_name_is_truncated_but_still_maps_back():
-    from orchestrator.llm.toolnames import build_mapping, restore, MAX_NAME_LENGTH
+    from orchestrator.llm.toolnames import MAX_NAME_LENGTH, build_mapping, restore
 
     long_id = "mcp." + "x" * 90 + ".search"
     mapping = build_mapping([{"name": long_id}])
@@ -1218,32 +1237,46 @@ def _result_context(output="the work is done"):
 def test_the_advocate_reports_objections_without_failing_the_task():
     """A suspicion is not a defect. It lowers confidence; it does not gate."""
 
-    validator = _advocate({
-        "objections": [
-            {"severity": "critical", "claim": "All six groups listed",
-             "objection": "Only four appear in the output",
-             "resolves_it": "Count the groups in the source file"},
-        ],
-        "strongest_case_against": "The list is incomplete.",
-    })
-    result = run(validator.validate(ValidationSpec(validator="devils_advocate"),
-                                    _result_context()))
+    validator = _advocate(
+        {
+            "objections": [
+                {
+                    "severity": "critical",
+                    "claim": "All six groups listed",
+                    "objection": "Only four appear in the output",
+                    "resolves_it": "Count the groups in the source file",
+                },
+            ],
+            "strongest_case_against": "The list is incomplete.",
+        }
+    )
+    result = run(
+        validator.validate(ValidationSpec(validator="devils_advocate"), _result_context())
+    )
 
-    assert result.passed is True          # it did not gate
-    assert result.confidence.value == "uncertain"   # but it did lower confidence
+    assert result.passed is True  # it did not gate
+    assert result.confidence.value == "uncertain"  # but it did lower confidence
     assert "1 objection" in result.message
 
 
 def test_the_advocate_can_be_made_to_gate_on_critical_objections():
-    validator = _advocate({
-        "objections": [
-            {"severity": "critical", "claim": "c", "objection": "o", "resolves_it": "r"},
-        ]
-    })
+    validator = _advocate(
+        {
+            "objections": [
+                {
+                    "severity": "critical",
+                    "claim": "c",
+                    "objection": "o",
+                    "resolves_it": "r",
+                },
+            ]
+        }
+    )
     result = run(
         validator.validate(
-            ValidationSpec(validator="devils_advocate",
-                           config={"block_on": "critical"}, mandatory=True),
+            ValidationSpec(
+                validator="devils_advocate", config={"block_on": "critical"}, mandatory=True
+            ),
             _result_context(),
         )
     )
@@ -1255,12 +1288,24 @@ def test_an_objection_with_no_resolution_is_dropped():
 
     from orchestrator.validation.advocate import parse_challenge
 
-    challenge = parse_challenge({
-        "objections": [
-            {"severity": "minor", "claim": "a", "objection": "vague unease", "resolves_it": ""},
-            {"severity": "minor", "claim": "b", "objection": "concrete", "resolves_it": "check x"},
-        ]
-    })
+    challenge = parse_challenge(
+        {
+            "objections": [
+                {
+                    "severity": "minor",
+                    "claim": "a",
+                    "objection": "vague unease",
+                    "resolves_it": "",
+                },
+                {
+                    "severity": "minor",
+                    "claim": "b",
+                    "objection": "concrete",
+                    "resolves_it": "check x",
+                },
+            ]
+        }
+    )
     assert len(challenge.objections) == 1
     assert challenge.objections[0].objection == "concrete"
 
@@ -1269,17 +1314,19 @@ def test_finding_nothing_is_reported_as_likely_never_confirmed():
     """Silence from a challenger is one more opinion, not proof."""
 
     validator = _advocate({"objections": [], "nothing_to_challenge": True})
-    result = run(validator.validate(ValidationSpec(validator="devils_advocate"),
-                                    _result_context()))
+    result = run(
+        validator.validate(ValidationSpec(validator="devils_advocate"), _result_context())
+    )
     assert result.passed is True
-    assert result.confidence.value == "likely"    # never "confirmed"
+    assert result.confidence.value == "likely"  # never "confirmed"
     assert "nothing substantive" in result.message
 
 
 def test_an_unreachable_advocate_does_not_fail_the_work():
     validator = _advocate(RuntimeError("model unreachable"))
-    result = run(validator.validate(ValidationSpec(validator="devils_advocate"),
-                                    _result_context()))
+    result = run(
+        validator.validate(ValidationSpec(validator="devils_advocate"), _result_context())
+    )
     assert result.passed is True
     assert result.confidence.value == "uncertain"
     assert "could not be reached" in result.message
@@ -1288,16 +1335,26 @@ def test_an_unreachable_advocate_does_not_fail_the_work():
 def test_objections_sort_by_severity_for_display():
     from orchestrator.validation.advocate import parse_challenge
 
-    challenge = parse_challenge({
-        "objections": [
-            {"severity": "minor", "claim": "c", "objection": "o", "resolves_it": "r"},
-            {"severity": "critical", "claim": "a", "objection": "o", "resolves_it": "r"},
-            {"severity": "substantive", "claim": "b", "objection": "o", "resolves_it": "r"},
-        ]
-    })
-    assert [o.severity for o in challenge.sorted()] == [
-        "critical", "substantive", "minor"
-    ]
+    challenge = parse_challenge(
+        {
+            "objections": [
+                {"severity": "minor", "claim": "c", "objection": "o", "resolves_it": "r"},
+                {
+                    "severity": "critical",
+                    "claim": "a",
+                    "objection": "o",
+                    "resolves_it": "r",
+                },
+                {
+                    "severity": "substantive",
+                    "claim": "b",
+                    "objection": "o",
+                    "resolves_it": "r",
+                },
+            ]
+        }
+    )
+    assert [o.severity for o in challenge.sorted()] == ["critical", "substantive", "minor"]
 
 
 def test_the_advocate_is_registered_only_when_a_model_exists():
@@ -1318,21 +1375,26 @@ def test_the_advocate_is_registered_only_when_a_model_exists():
 
 
 def test_summarise_distinguishes_not_run_from_found_nothing():
-    """"Nobody argued against it" and "the argument failed" are opposite claims."""
+    """ "Nobody argued against it" and "the argument failed" are opposite claims."""
 
-    from orchestrator.validation.advocate import summarise
     from orchestrator.core.domain.models import ValidationResult
+    from orchestrator.validation.advocate import summarise
 
-    never_ran = summarise([
-        ValidationResult(validator="non_empty", passed=True, message="ok"),
-    ])
+    never_ran = summarise(
+        [
+            ValidationResult(validator="non_empty", passed=True, message="ok"),
+        ]
+    )
     assert never_ran["ran"] is False
     assert never_ran["objections"] == []
 
-    ran_and_found_nothing = summarise([
-        ValidationResult(validator="devils_advocate", passed=True,
-                         message="nothing substantive"),
-    ])
+    ran_and_found_nothing = summarise(
+        [
+            ValidationResult(
+                validator="devils_advocate", passed=True, message="nothing substantive"
+            ),
+        ]
+    )
     assert ran_and_found_nothing["ran"] is True
     assert ran_and_found_nothing["objections"] == []
 
@@ -1344,6 +1406,7 @@ def test_summarise_distinguishes_not_run_from_found_nothing():
 
 def _client(**security_kwargs):
     from fastapi.testclient import TestClient
+
     from orchestrator.api.app import create_app
     from orchestrator.api.security import SecurityConfig
 
@@ -1353,7 +1416,7 @@ def _client(**security_kwargs):
 def test_binding_to_the_network_without_a_token_is_refused():
     """An unauthenticated API that runs tools is a remote execution endpoint."""
 
-    from orchestrator.api.security import SecurityConfig, InsecureBinding
+    from orchestrator.api.security import InsecureBinding, SecurityConfig
 
     with pytest.raises(InsecureBinding):
         SecurityConfig(host="0.0.0.0").verify_binding()
@@ -1378,8 +1441,14 @@ def test_a_protected_api_rejects_calls_without_a_token():
     client = _client(host="0.0.0.0", tokens=("right-token",))
 
     assert client.get("/v1/executions").status_code == 401
-    assert client.get("/v1/executions", headers={"Authorization": "Bearer wrong"}).status_code == 401
-    assert client.get("/v1/executions", headers={"Authorization": "right-token"}).status_code == 401
+    assert (
+        client.get("/v1/executions", headers={"Authorization": "Bearer wrong"}).status_code
+        == 401
+    )
+    assert (
+        client.get("/v1/executions", headers={"Authorization": "right-token"}).status_code
+        == 401
+    )
 
     ok = client.get("/v1/executions", headers={"Authorization": "Bearer right-token"})
     assert ok.status_code == 200
@@ -1396,9 +1465,12 @@ def test_liveness_answers_without_a_token_so_probes_keep_working():
 def test_token_rotation_accepts_both_tokens():
     client = _client(host="0.0.0.0", tokens=("old", "new"))
     for token in ("old", "new"):
-        assert client.get(
-            "/v1/executions", headers={"Authorization": f"Bearer {token}"}
-        ).status_code == 200
+        assert (
+            client.get(
+                "/v1/executions", headers={"Authorization": f"Bearer {token}"}
+            ).status_code
+            == 200
+        )
 
 
 def test_an_oversized_body_is_refused_before_it_is_read():
@@ -1411,7 +1483,7 @@ def test_an_oversized_body_is_refused_before_it_is_read():
 def test_tokens_come_from_the_environment_not_the_config_file(monkeypatch):
     """A config file gets committed; an environment variable does not."""
 
-    from orchestrator.api.security import SecurityConfig, ENV_TOKEN
+    from orchestrator.api.security import ENV_TOKEN, SecurityConfig
 
     monkeypatch.setenv(ENV_TOKEN, " a , b ,, ")
     assert SecurityConfig.from_env().tokens == ("a", "b")
@@ -1442,11 +1514,12 @@ def test_the_console_page_loads_without_a_token_but_its_data_does_not():
 
 def _aged_store(tmp_path, rows):
     """A store holding executions with controlled ages and statuses."""
+    from datetime import datetime, timedelta
+
     from orchestrator.core.state.sqlite_store import SQLiteStateStore
-    from datetime import datetime, timedelta, timezone
 
     store = SQLiteStateStore(tmp_path / "state.db")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for index, (status, age_days) in enumerate(rows):
         stamp = (now - timedelta(days=age_days)).isoformat()
         execution_id = f"exe_{index}_{status}"
@@ -1458,8 +1531,7 @@ def _aged_store(tmp_path, rows):
         store._conn.execute(
             "INSERT INTO audit_events (execution_id, sequence, id, type, "
             "task_id, actor, timestamp, payload) VALUES (?,?,?,?,?,?,?,?)",
-            (execution_id, 1, f"aud_{index}", "execution.created",
-             None, None, stamp, "{}"),
+            (execution_id, 1, f"aud_{index}", "execution.created", None, None, stamp, "{}"),
         )
     store._conn.commit()
     return store
@@ -1486,12 +1558,12 @@ def test_pruning_never_deletes_work_that_is_still_in_flight(tmp_path):
     """Age is not evidence of abandonment. A run waiting on a person is blocked."""
 
     ages = [
-        ("waiting", 500),      # blocked on a human for over a year
+        ("waiting", 500),  # blocked on a human for over a year
         ("paused", 500),
         ("running", 500),
-        ("cancelling", 500),   # mid-transition, NOT the same as cancelled
+        ("cancelling", 500),  # mid-transition, NOT the same as cancelled
         ("reviewing", 500),
-        ("completed", 500),    # the only one that should go
+        ("completed", 500),  # the only one that should go
     ]
     store = _aged_store(tmp_path, ages)
     report = run(store.prune(older_than_days=1))
@@ -1523,8 +1595,8 @@ def test_asking_to_prune_a_non_terminal_status_is_refused_not_ignored(tmp_path):
 def test_prunable_statuses_are_derived_from_the_enum_not_retyped():
     """A status added later must default to protected, never to deletable."""
 
-    from orchestrator.core.state.sqlite_store import PRUNABLE_STATUSES
     from orchestrator.core.domain.enums import TERMINAL_EXECUTION_STATUSES
+    from orchestrator.core.state.sqlite_store import PRUNABLE_STATUSES
 
     assert set(PRUNABLE_STATUSES) == {s.value for s in TERMINAL_EXECUTION_STATUSES}
 
@@ -1544,7 +1616,9 @@ def test_the_console_is_found_from_inside_the_package():
     assert resolved is not None
     assert resolved.is_file()
 
-    packaged = Path(__file__).resolve().parents[1] / "src" / "orchestrator" / "ui" / "console.html"
+    packaged = (
+        Path(__file__).resolve().parents[1] / "src" / "orchestrator" / "ui" / "console.html"
+    )
     assert packaged.is_file(), "the console must ship inside the package"
     assert resolved == packaged
 

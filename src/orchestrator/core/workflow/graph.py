@@ -8,8 +8,8 @@ polls. No LLM is involved at this level (spec sections 6, 30, 106).
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
-from typing import Iterable, Iterator, Mapping
 
 from ...errors import InvalidWorkflow
 from ..domain.enums import TaskStatus
@@ -208,8 +208,7 @@ class TaskGraph:
         dead = {
             tid
             for tid, task in self._tasks.items()
-            if task.status
-            in (TaskStatus.FAILED, TaskStatus.SKIPPED, TaskStatus.CANCELLED)
+            if task.status in (TaskStatus.FAILED, TaskStatus.SKIPPED, TaskStatus.CANCELLED)
         }
         if not dead:
             return []

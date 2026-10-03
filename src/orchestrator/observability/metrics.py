@@ -38,20 +38,49 @@ _SAFE_LABEL = re.compile(r"^[a-zA-Z0-9_.:/-]{0,64}$")
 # Values that may appear in a label, by label name. Closed sets, so a new
 # status has to be added here deliberately.
 ALLOWED_LABELS: dict[str, frozenset[str]] = {
-    "status": frozenset({
-        "created", "planning", "ready", "running", "waiting", "validating",
-        "reviewing", "recovering", "pausing", "paused", "cancelling",
-        "cancelled", "failed", "completed",
-    }),
-    "confidence": frozenset({
-        "confirmed", "likely", "uncertain", "blocked", "failed", "unknown",
-    }),
+    "status": frozenset(
+        {
+            "created",
+            "planning",
+            "ready",
+            "running",
+            "waiting",
+            "validating",
+            "reviewing",
+            "recovering",
+            "pausing",
+            "paused",
+            "cancelling",
+            "cancelled",
+            "failed",
+            "completed",
+        }
+    ),
+    "confidence": frozenset(
+        {
+            "confirmed",
+            "likely",
+            "uncertain",
+            "blocked",
+            "failed",
+            "unknown",
+        }
+    ),
     "outcome": frozenset({"ok", "error", "denied", "timeout"}),
-    "reason": frozenset({
-        "policy", "permission", "budget", "validation", "egress",
-        "authentication", "authorization", "rate_limit", "payload_too_large",
-        "unknown",
-    }),
+    "reason": frozenset(
+        {
+            "policy",
+            "permission",
+            "budget",
+            "validation",
+            "egress",
+            "authentication",
+            "authorization",
+            "rate_limit",
+            "payload_too_large",
+            "unknown",
+        }
+    ),
     "severity": frozenset({"critical", "substantive", "minor"}),
     "kind": frozenset({"tool", "mcp_tool", "model", "agent", "workflow"}),
 }
@@ -127,15 +156,16 @@ class Metrics:
     # -- recording ---------------------------------------------------------
 
     def _key(self, name: str, labels: dict[str, str] | None) -> tuple:
-        pairs = tuple(
-            sorted((k, _check_label(k, v)) for k, v in (labels or {}).items())
-        )
+        pairs = tuple(sorted((k, _check_label(k, v)) for k, v in (labels or {}).items()))
         return (name, pairs)
 
     def _room(self, store: dict, key: tuple) -> bool:
         if key in store:
             return True
-        if len(self._counters) + len(self._gauges) + len(self._histograms) >= self._max_series:
+        if (
+            len(self._counters) + len(self._gauges) + len(self._histograms)
+            >= self._max_series
+        ):
             self._dropped += 1
             return False
         return True
@@ -201,8 +231,10 @@ class Metrics:
         )
         if seconds:
             self.observe(
-                "orchestrator_tool_duration_seconds", seconds,
-                help="Tool call latency.", tool=tool_id,
+                "orchestrator_tool_duration_seconds",
+                seconds,
+                help="Tool call latency.",
+                tool=tool_id,
             )
 
     def model_called(self, model_id: str, outcome: str, seconds: float) -> None:
@@ -213,13 +245,16 @@ class Metrics:
             outcome=outcome,
         )
         self.observe(
-            "orchestrator_model_latency_seconds", seconds,
-            help="Model call latency.", model=model_id,
+            "orchestrator_model_latency_seconds",
+            seconds,
+            help="Model call latency.",
+            model=model_id,
         )
 
     def approval_waited(self, seconds: float) -> None:
         self.observe(
-            "orchestrator_approval_wait_seconds", seconds,
+            "orchestrator_approval_wait_seconds",
+            seconds,
             help="How long executions waited on a human.",
         )
 
@@ -227,7 +262,8 @@ class Metrics:
         self.counter(
             "orchestrator_policy_denials_total",
             help="Operations refused by policy.",
-            kind=kind, reason=reason,
+            kind=kind,
+            reason=reason,
         )
 
     def security_event(self, reason: str) -> None:
@@ -246,7 +282,8 @@ class Metrics:
 
     def queue_wait(self, seconds: float) -> None:
         self.observe(
-            "orchestrator_queue_wait_seconds", seconds,
+            "orchestrator_queue_wait_seconds",
+            seconds,
             help="Time between an execution being created and starting.",
         )
 
@@ -287,11 +324,15 @@ class Metrics:
                 lines.append(
                     f"{name}_bucket{_format_labels(pairs, le='+Inf')} {cumulative}"
                 )
-                lines.append(f"{name}_sum{_format_labels(pairs)} {_number(histogram.total)}")
+                lines.append(
+                    f"{name}_sum{_format_labels(pairs)} {_number(histogram.total)}"
+                )
                 lines.append(f"{name}_count{_format_labels(pairs)} {histogram.count}")
 
             if self._dropped:
-                lines.append("# HELP orchestrator_metrics_dropped_total Series dropped at the cardinality ceiling.")
+                lines.append(
+                    "# HELP orchestrator_metrics_dropped_total Series dropped at the cardinality ceiling."
+                )
                 lines.append("# TYPE orchestrator_metrics_dropped_total counter")
                 lines.append(f"orchestrator_metrics_dropped_total {self._dropped}")
 

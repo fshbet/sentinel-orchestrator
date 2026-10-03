@@ -15,7 +15,6 @@ Process execution is privileged. These tests treat it that way.
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 
@@ -60,7 +59,11 @@ def test_the_environment_is_not_inherited_by_default(monkeypatch, tmp_path):
 
     result = _call(
         _policy(tmp_path),
-        command=[sys.executable, "-c", "import os,json; print(json.dumps(dict(os.environ)))"],
+        command=[
+            sys.executable,
+            "-c",
+            "import os,json; print(json.dumps(dict(os.environ)))",
+        ],
     )
     child_env = result["stdout"]
     assert "should-never-be-visible" not in child_env
@@ -73,8 +76,9 @@ def test_only_allowlisted_variables_are_passed_through(monkeypatch):
     monkeypatch.setenv("SECRET_THING", "nope")
     monkeypatch.setenv("BUILD_ID", "1234")
 
-    env = build_environment(ExecPolicy(allowed_commands=("x",),
-                                       environment_allowlist=("BUILD_ID",)))
+    env = build_environment(
+        ExecPolicy(allowed_commands=("x",), environment_allowlist=("BUILD_ID",))
+    )
     assert env.get("BUILD_ID") == "1234"
     assert "SECRET_THING" not in env
 
@@ -90,8 +94,11 @@ def test_explicitly_passed_variables_cannot_smuggle_secrets(tmp_path):
     """A caller-supplied env must be filtered by the same allowlist."""
     policy = _policy(tmp_path, environment_allowlist=("BUILD_ID",))
     with pytest.raises(PermissionDenied) as exc:
-        _call(policy, command=[sys.executable, "-c", "print(1)"],
-              env={"AWS_SECRET_ACCESS_KEY": "leak"})
+        _call(
+            policy,
+            command=[sys.executable, "-c", "print(1)"],
+            env={"AWS_SECRET_ACCESS_KEY": "leak"},
+        )
     assert "AWS_SECRET_ACCESS_KEY" in str(exc.value)
 
 
@@ -127,9 +134,7 @@ def test_the_allowlist_matches_a_resolved_path_not_a_basename(tmp_path):
 
 def test_the_configured_executable_itself_resolves(tmp_path):
     policy = ExecPolicy(allowed_commands=(sys.executable,))
-    assert resolve_executable(sys.executable, policy) == str(
-        Path(sys.executable).resolve()
-    )
+    assert resolve_executable(sys.executable, policy) == str(Path(sys.executable).resolve())
 
 
 def test_a_symlink_to_a_forbidden_executable_is_refused(tmp_path):

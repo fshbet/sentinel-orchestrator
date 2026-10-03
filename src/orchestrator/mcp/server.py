@@ -15,7 +15,8 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-from typing import Any, Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from ..config.loader import load
 from ..core.domain.enums import ExecutionStatus
@@ -342,7 +343,7 @@ def _error(request_id: Any, code: int, message: str) -> dict[str, Any]:
 
 async def serve_stdio(
     *,
-    config_path: Optional[str] = None,
+    config_path: str | None = None,
     allow_control: bool = False,
     orchestrator: Orchestrator | None = None,
 ) -> None:

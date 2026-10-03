@@ -35,7 +35,6 @@ from orchestrator.evaluation.runner import (
     write_reports,
 )
 
-
 # --------------------------------------------------------------------------
 # The shipped library
 # --------------------------------------------------------------------------
@@ -65,10 +64,10 @@ def test_every_case_is_described_and_versioned():
 def test_normal_adversarial_high_risk_and_recovery_are_all_covered():
     """The four scenario kinds the suite is supposed to span."""
     suites = {case.suite for case in CASES}
-    assert Suite.PLANNING in suites            # normal
-    assert Suite.INJECTION in suites           # adversarial
-    assert Suite.POLICY in suites              # high-risk
-    assert Suite.RECOVERY in suites            # recovery
+    assert Suite.PLANNING in suites  # normal
+    assert Suite.INJECTION in suites  # adversarial
+    assert Suite.POLICY in suites  # high-risk
+    assert Suite.RECOVERY in suites  # recovery
 
     severities = {case.severity for case in CASES}
     assert Severity.CRITICAL in severities
@@ -77,8 +76,9 @@ def test_normal_adversarial_high_risk_and_recovery_are_all_covered():
 
 def test_the_whole_shipped_suite_passes():
     report = run_suite()
-    failures = [(r.case.id, r.outcome, r.detail) for r in report.results
-                if r.outcome != PASS]
+    failures = [
+        (r.case.id, r.outcome, r.detail) for r in report.results if r.outcome != PASS
+    ]
     assert not failures, failures
     assert report.ok is True
 
@@ -93,9 +93,11 @@ def test_security_suites_are_gating_and_quality_suites_are_not():
         if case.suite in SECURITY_SUITES:
             assert case.gating is True, case.id
 
-    non_gating = [c for c in CASES
-                  if c.suite not in SECURITY_SUITES
-                  and c.severity is not Severity.CRITICAL]
+    non_gating = [
+        c
+        for c in CASES
+        if c.suite not in SECURITY_SUITES and c.severity is not Severity.CRITICAL
+    ]
     assert non_gating, "every case is gating; the quality score would be vacuous"
     for case in non_gating:
         assert case.gating is False, case.id
@@ -103,7 +105,10 @@ def test_security_suites_are_gating_and_quality_suites_are_not():
 
 def test_a_critical_case_gates_even_outside_a_security_suite():
     case = EvaluationCase(
-        id="c", version=1, suite=Suite.PLANNING, severity=Severity.CRITICAL,
+        id="c",
+        version=1,
+        suite=Suite.PLANNING,
+        severity=Severity.CRITICAL,
         description="critical planning case",
     )
     assert case.gating is True
@@ -129,46 +134,63 @@ def test_an_unknown_suite_lists_the_real_options():
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("case", [
-    EvaluationCase(
-        id="inverted-metadata", version=1, suite=Suite.EGRESS,
-        severity=Severity.CRITICAL,
-        description="asserts the metadata endpoint is reachable",
-        egress_url="http://169.254.169.254/latest/",
-        egress_policy={"allowed_hosts": ["169.254.169.254"], "allow_http": True,
-                       "allow_link_local": True},
-        expect_egress_allowed=True,
-    ),
-    EvaluationCase(
-        id="inverted-policy", version=1, suite=Suite.POLICY,
-        severity=Severity.CRITICAL,
-        description="asserts an ungranted tool is permitted",
-        context={"profile": "production"},
-        granted_permissions=("fs.read",),
-        expect_policy_allowed=True,
-    ),
-    EvaluationCase(
-        id="inverted-validation", version=1, suite=Suite.VALIDATION,
-        severity=Severity.HIGH,
-        description="asserts empty output passes a non-empty check",
-        validator="non_empty", validator_output="",
-        expect_validation_passed=True,
-    ),
-    EvaluationCase(
-        id="inverted-tool-surface", version=1, suite=Suite.TOOL_SELECTION,
-        severity=Severity.CRITICAL,
-        description="asserts a write tool exists under a read-only policy",
-        egress_policy={"allowed_hosts": ["example.com"], "allowed_methods": ["GET"]},
-        allowed_tools=("http.send",),
-    ),
-    EvaluationCase(
-        id="inverted-plan", version=1, suite=Suite.PLANNING,
-        severity=Severity.HIGH,
-        description="asserts the wrong task count",
-        model_script={"tasks": [{"name": "one", "depends_on": []}]},
-        expect_task_count=5,
-    ),
-])
+@pytest.mark.parametrize(
+    "case",
+    [
+        EvaluationCase(
+            id="inverted-metadata",
+            version=1,
+            suite=Suite.EGRESS,
+            severity=Severity.CRITICAL,
+            description="asserts the metadata endpoint is reachable",
+            egress_url="http://169.254.169.254/latest/",
+            egress_policy={
+                "allowed_hosts": ["169.254.169.254"],
+                "allow_http": True,
+                "allow_link_local": True,
+            },
+            expect_egress_allowed=True,
+        ),
+        EvaluationCase(
+            id="inverted-policy",
+            version=1,
+            suite=Suite.POLICY,
+            severity=Severity.CRITICAL,
+            description="asserts an ungranted tool is permitted",
+            context={"profile": "production"},
+            granted_permissions=("fs.read",),
+            expect_policy_allowed=True,
+        ),
+        EvaluationCase(
+            id="inverted-validation",
+            version=1,
+            suite=Suite.VALIDATION,
+            severity=Severity.HIGH,
+            description="asserts empty output passes a non-empty check",
+            validator="non_empty",
+            validator_output="",
+            expect_validation_passed=True,
+        ),
+        EvaluationCase(
+            id="inverted-tool-surface",
+            version=1,
+            suite=Suite.TOOL_SELECTION,
+            severity=Severity.CRITICAL,
+            description="asserts a write tool exists under a read-only policy",
+            egress_policy={"allowed_hosts": ["example.com"], "allowed_methods": ["GET"]},
+            allowed_tools=("http.send",),
+        ),
+        EvaluationCase(
+            id="inverted-plan",
+            version=1,
+            suite=Suite.PLANNING,
+            severity=Severity.HIGH,
+            description="asserts the wrong task count",
+            model_script={"tasks": [{"name": "one", "depends_on": []}]},
+            expect_task_count=5,
+        ),
+    ],
+)
 def test_an_inverted_expectation_fails(case):
     """If these passed, the harness would be checking nothing."""
     result = run_case(case)
@@ -178,9 +200,13 @@ def test_an_inverted_expectation_fails(case):
 
 def test_an_inverted_security_case_blocks_the_release():
     case = EvaluationCase(
-        id="inverted", version=1, suite=Suite.EGRESS, severity=Severity.CRITICAL,
+        id="inverted",
+        version=1,
+        suite=Suite.EGRESS,
+        severity=Severity.CRITICAL,
         description="asserts an empty allowlist permits everything",
-        egress_url="https://anything.test/", egress_policy={"allowed_hosts": []},
+        egress_url="https://anything.test/",
+        egress_policy={"allowed_hosts": []},
         expect_egress_allowed=True,
     )
     report = run_suite(cases=[case])
@@ -191,9 +217,13 @@ def test_an_inverted_security_case_blocks_the_release():
 def test_a_runner_exception_is_an_error_not_a_pass():
     """A case that could not run did not pass."""
     case = EvaluationCase(
-        id="broken", version=1, suite=Suite.VALIDATION, severity=Severity.LOW,
+        id="broken",
+        version=1,
+        suite=Suite.VALIDATION,
+        severity=Severity.LOW,
         description="names a validator that does not exist",
-        validator="no_such_validator_exists", validator_output="x",
+        validator="no_such_validator_exists",
+        validator_output="x",
         expect_validation_passed=True,
     )
     assert run_case(case).outcome == ERROR
@@ -202,8 +232,13 @@ def test_a_runner_exception_is_an_error_not_a_pass():
 def test_errors_count_against_the_quality_score():
     """Otherwise a harness that breaks reports a perfect score."""
     broken = EvaluationCase(
-        id="broken", version=1, suite=Suite.VALIDATION, severity=Severity.LOW,
-        description="unrunnable", validator="nope", validator_output="x",
+        id="broken",
+        version=1,
+        suite=Suite.VALIDATION,
+        severity=Severity.LOW,
+        description="unrunnable",
+        validator="nope",
+        validator_output="x",
         expect_validation_passed=True,
     )
     report = run_suite(cases=[broken])
@@ -244,9 +279,14 @@ def test_both_reports_are_written(tmp_path):
 
 def test_a_blocking_failure_is_named_in_the_markdown():
     case = EvaluationCase(
-        id="will-fail", version=1, suite=Suite.POLICY, severity=Severity.CRITICAL,
-        description="inverted", context={"profile": "production"},
-        granted_permissions=("fs.read",), expect_policy_allowed=True,
+        id="will-fail",
+        version=1,
+        suite=Suite.POLICY,
+        severity=Severity.CRITICAL,
+        description="inverted",
+        context={"profile": "production"},
+        granted_permissions=("fs.read",),
+        expect_policy_allowed=True,
     )
     markdown = run_suite(cases=[case]).to_markdown()
     assert "Blocking failures" in markdown

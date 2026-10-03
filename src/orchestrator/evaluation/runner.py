@@ -131,7 +131,8 @@ class EvaluationReport:
                 suite.value: {
                     "total": sum(1 for r in self.results if r.case.suite is suite),
                     "passed": sum(
-                        1 for r in self.results
+                        1
+                        for r in self.results
                         if r.case.suite is suite and r.outcome == PASS
                     ),
                 }
@@ -186,16 +187,18 @@ class EvaluationReport:
             lines.append(f"| {suite} | {counts['passed']} | {counts['total']} |")
 
         non_blocking = [
-            r for r in self.results
-            if r.outcome in (FAIL, ERROR) and not r.blocking
+            r for r in self.results if r.outcome in (FAIL, ERROR) and not r.blocking
         ]
         if non_blocking:
-            lines += ["", "## Non-blocking failures", "",
-                      "| Case | Outcome | Detail |", "|---|---|---|"]
+            lines += [
+                "",
+                "## Non-blocking failures",
+                "",
+                "| Case | Outcome | Detail |",
+                "|---|---|---|",
+            ]
             for result in non_blocking:
-                lines.append(
-                    f"| `{result.case.id}` | {result.outcome} | {result.detail} |"
-                )
+                lines.append(f"| `{result.case.id}` | {result.outcome} | {result.detail} |")
 
         lines += [
             "",
@@ -291,9 +294,7 @@ def _run_egress(case: EvaluationCase) -> tuple[str, str]:
                 max_classification=case.context.get("max_classification", "public"),
             )
         data_policy = DataFlowPolicy(providers, enabled=True)
-        decision = data_policy.evaluate(
-            case.provider, case.data_classification or None
-        )
+        decision = data_policy.evaluate(case.provider, case.data_classification or None)
         if decision.allowed != bool(case.expect_data_egress_allowed):
             return FAIL, (
                 f"data egress allowed={decision.allowed}, expected "
@@ -332,8 +333,7 @@ def _run_injection(case: EvaluationCase) -> tuple[str, str]:
         return _run_egress(case)
 
     # Permission claims in the objective must not expand the grant.
-    for tool_permission in ("fs.write", "secret.read", "process.execute",
-                            "network.write"):
+    for tool_permission in ("fs.write", "secret.read", "process.execute", "network.write"):
         if tool_permission in case.granted_permissions:
             continue
         if perms.missing([tool_permission], list(case.granted_permissions)) == []:
@@ -367,8 +367,7 @@ def _run_tool_selection(case: EvaluationCase) -> tuple[str, str]:
 
         with tempfile.TemporaryDirectory() as workspace:
             registered = {
-                spec.id
-                for spec, _ in filesystem_tools(workspace, allow_write=False)
+                spec.id for spec, _ in filesystem_tools(workspace, allow_write=False)
             }
 
     for tool in case.disallowed_tools:
@@ -409,8 +408,7 @@ def _run_planning(case: EvaluationCase) -> tuple[str, str]:
     if case.expect_task_count is not None:
         if len(execution.tasks) != case.expect_task_count:
             return FAIL, (
-                f"plan has {len(execution.tasks)} tasks, expected "
-                f"{case.expect_task_count}"
+                f"plan has {len(execution.tasks)} tasks, expected {case.expect_task_count}"
             )
     for expected in case.expect_plan_contains:
         if not any(t.name == expected for t in execution.tasks.values()):
@@ -458,10 +456,12 @@ def _run_validation(case: EvaluationCase) -> tuple[str, str]:
     execution.tasks[task.id] = task
 
     validator = registry.get(case.validator)
-    result = asyncio.run(validator.validate(
-        ValidationSpec(validator=case.validator, config=dict(case.validator_config)),
-        ValidationContext(execution=execution, task=task),
-    ))
+    result = asyncio.run(
+        validator.validate(
+            ValidationSpec(validator=case.validator, config=dict(case.validator_config)),
+            ValidationContext(execution=execution, task=task),
+        )
+    )
 
     if case.expect_validation_passed is not None:
         if result.passed != case.expect_validation_passed:
@@ -557,9 +557,7 @@ def run_case(case: EvaluationCase) -> EvaluationResult:
         outcome, detail = runner(case)
     except Exception as exc:  # noqa: BLE001 - an exception is ERROR, never PASS
         outcome, detail = ERROR, f"{type(exc).__name__}: {exc}"
-    return EvaluationResult(
-        case, outcome, detail, (time.monotonic() - started) * 1000
-    )
+    return EvaluationResult(case, outcome, detail, (time.monotonic() - started) * 1000)
 
 
 def run_suite(

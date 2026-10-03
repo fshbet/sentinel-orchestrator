@@ -89,9 +89,7 @@ def two_replicas(body):
         try:
             async with pool_a.acquire() as connection:
                 await connection.execute("TRUNCATE api_tokens")
-            return await body(
-                PostgresTokenStore(pool_a), PostgresTokenStore(pool_b)
-            )
+            return await body(PostgresTokenStore(pool_a), PostgresTokenStore(pool_b))
         finally:
             await pool_a.close()
             await pool_b.close()
@@ -118,11 +116,11 @@ def test_revoking_on_one_replica_is_immediate_on_the_other():
     async def body(a, b):
         secret, record = await a.issue("ci", scopes=[EXECUTIONS_READ])
 
-        assert (await b.resolve(secret)).id == "ci"          # B accepts it
+        assert (await b.resolve(secret)).id == "ci"  # B accepts it
         assert await a.revoke(record.token_id, reason="leaked") is True
 
         with pytest.raises(TokenRevoked):
-            await b.resolve(secret)                           # B rejects it now
+            await b.resolve(secret)  # B rejects it now
         with pytest.raises(TokenRevoked):
             await a.resolve(secret)
 
@@ -160,7 +158,8 @@ def test_expiry_is_enforced_on_every_replica():
 def test_not_before_is_enforced_on_every_replica():
     async def body(a, b):
         secret, _ = await a.issue(
-            "ci", scopes=[ADMIN],
+            "ci",
+            scopes=[ADMIN],
             not_before=datetime.now(UTC) + timedelta(hours=2),
         )
         for store in (a, b):
@@ -189,8 +188,7 @@ def test_an_unknown_credential_is_rejected_on_every_replica():
 @requires_postgres
 def test_the_database_never_contains_the_raw_token():
     async def body(a, _b):
-        secret, _ = await a.issue("ops", scopes=[ADMIN],
-                                  description="operations console")
+        secret, _ = await a.issue("ops", scopes=[ADMIN], description="operations console")
         async with a._pool.acquire() as connection:
             rows = await connection.fetch("SELECT * FROM api_tokens")
         dumped = "".join(str(dict(r)) for r in rows)
@@ -225,8 +223,7 @@ def test_a_revocation_is_visible_in_the_listing_from_the_other_replica():
         _secret, record = await a.issue("ci", scopes=[EXECUTIONS_READ])
         await a.revoke(record.token_id, reason="rotated", actor="token-admin")
 
-        entry = [t for t in await b.list_tokens()
-                 if t["token_id"] == record.token_id][0]
+        entry = [t for t in await b.list_tokens() if t["token_id"] == record.token_id][0]
         assert entry["revoked"] is True
         assert entry["revoked_at"] is not None
         assert entry["revoked_by"] == "token-admin"
@@ -271,14 +268,14 @@ def test_seeding_is_idempotent_across_replicas(monkeypatch):
     monkeypatch.setenv("SEED_OPS_TOKEN", "seeded-ops-value")
     monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
 
-    api = {"principals": [
-        {"id": "ops", "token_env": "SEED_OPS_TOKEN", "scopes": ["admin"]}
-    ]}
+    api = {
+        "principals": [{"id": "ops", "token_env": "SEED_OPS_TOKEN", "scopes": ["admin"]}]
+    }
 
     async def body(a, b):
         await a.seed_from_config(api)
-        await b.seed_from_config(api)     # the second replica booting
-        await a.seed_from_config(api)     # a restart
+        await b.seed_from_config(api)  # the second replica booting
+        await a.seed_from_config(api)  # a restart
 
         listed = await a.list_tokens()
         assert len(listed) == 1, [t["principal"] for t in listed]
@@ -293,9 +290,11 @@ def test_a_rolling_restart_does_not_resurrect_a_revoked_token(monkeypatch):
     monkeypatch.setenv("SEED_CI_TOKEN", "seeded-ci-value")
     monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
 
-    api = {"principals": [
-        {"id": "ci", "token_env": "SEED_CI_TOKEN", "scopes": ["executions.read"]}
-    ]}
+    api = {
+        "principals": [
+            {"id": "ci", "token_env": "SEED_CI_TOKEN", "scopes": ["executions.read"]}
+        ]
+    }
 
     async def body(a, b):
         await a.seed_from_config(api)
@@ -337,7 +336,7 @@ def test_revocation_is_idempotent_across_replicas():
     async def body(a, b):
         secret, record = await a.issue("ci", scopes=[ADMIN])
         assert await a.revoke(record.token_id) is True
-        assert await b.revoke(record.token_id) is True   # already revoked
+        assert await b.revoke(record.token_id) is True  # already revoked
         with pytest.raises(TokenRevoked):
             await b.resolve(secret)
 
@@ -365,9 +364,7 @@ def two_limiters(body):
         try:
             async with pool_a.acquire() as connection:
                 await connection.execute("TRUNCATE rate_limit_hits")
-            return await body(
-                PostgresRateLimiter(pool_a), PostgresRateLimiter(pool_b)
-            )
+            return await body(PostgresRateLimiter(pool_a), PostgresRateLimiter(pool_b))
         finally:
             await pool_a.close()
             await pool_b.close()

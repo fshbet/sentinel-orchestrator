@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -89,8 +89,7 @@ def test_an_expired_token_is_rejected_as_expired():
 
 def test_a_token_within_its_lifetime_resolves():
     store = TokenStore()
-    secret, _ = store.issue("ci", scopes=[EXECUTIONS_READ],
-                            lifetime=timedelta(hours=1))
+    secret, _ = store.issue("ci", scopes=[EXECUTIONS_READ], lifetime=timedelta(hours=1))
     principal = store.resolve(secret)
     assert principal.id == "ci"
     assert principal.has(EXECUTIONS_READ)
@@ -104,7 +103,7 @@ def test_a_token_with_no_expiry_never_expires():
 
 def test_a_token_is_not_valid_before_its_start_time():
     store = TokenStore()
-    future = datetime.now(timezone.utc) + timedelta(hours=2)
+    future = datetime.now(UTC) + timedelta(hours=2)
     secret, _ = store.issue("scheduled", not_before=future)
     with pytest.raises(TokenNotYetValid):
         store.resolve(secret)
@@ -113,11 +112,9 @@ def test_a_token_is_not_valid_before_its_start_time():
 def test_clock_skew_is_tolerated_in_both_directions():
     """Rejecting a one-second clock difference is a self-inflicted outage."""
     store = TokenStore()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
-    barely_future, _ = store.issue(
-        "a", not_before=now + (CLOCK_SKEW / 2)
-    )
+    barely_future, _ = store.issue("a", not_before=now + (CLOCK_SKEW / 2))
     assert store.resolve(barely_future).id == "a"
 
     barely_past, _ = store.issue("b", lifetime=-(CLOCK_SKEW / 2))
@@ -129,7 +126,7 @@ def test_expiry_is_evaluated_at_use_not_at_issue():
     secret, record = store.issue("ci", lifetime=timedelta(hours=1))
 
     assert store.resolve(secret).id == "ci"
-    later = datetime.now(timezone.utc) + timedelta(hours=2)
+    later = datetime.now(UTC) + timedelta(hours=2)
     with pytest.raises(TokenExpired):
         store.resolve(secret, now=later)
 
@@ -252,10 +249,18 @@ def test_legacy_rotation_still_accepts_both(monkeypatch):
 def test_configured_principals_get_their_lifetime(monkeypatch):
     monkeypatch.setenv("CI_TOKEN", "ci-secret-value")
     monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
-    store = TokenStore.from_config({
-        "principals": [{"id": "ci", "token_env": "CI_TOKEN",
-                        "scopes": ["executions.read"], "lifetime_days": 30}]
-    })
+    store = TokenStore.from_config(
+        {
+            "principals": [
+                {
+                    "id": "ci",
+                    "token_env": "CI_TOKEN",
+                    "scopes": ["executions.read"],
+                    "lifetime_days": 30,
+                }
+            ]
+        }
+    )
     listed = store.list_tokens()
     assert len(listed) == 1
     assert listed[0]["expires_at"] is not None
@@ -265,9 +270,7 @@ def test_configured_principals_get_their_lifetime(monkeypatch):
 def test_tokens_loaded_from_the_environment_are_hashed(monkeypatch):
     monkeypatch.setenv("CI_TOKEN", "ci-secret-value")
     monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
-    store = TokenStore.from_config({
-        "principals": [{"id": "ci", "token_env": "CI_TOKEN"}]
-    })
+    store = TokenStore.from_config({"principals": [{"id": "ci", "token_env": "CI_TOKEN"}]})
     assert "ci-secret-value" not in str(store.list_tokens())
 
 
@@ -289,8 +292,7 @@ def _proxy_config(**overrides):
 def test_an_identity_header_from_the_trusted_proxy_is_believed():
     principal = proxy_identity(
         "10.0.0.9",
-        {"X-Forwarded-User": "alice@example.com",
-         "X-Forwarded-Groups": "viewers"},
+        {"X-Forwarded-User": "alice@example.com", "X-Forwarded-Groups": "viewers"},
         _proxy_config(),
     )
     assert principal is not None
@@ -304,8 +306,7 @@ def test_the_same_header_from_anyone_else_is_ignored():
     """The mistake this mode exists to avoid: header spoofing."""
     spoofed = proxy_identity(
         "203.0.113.7",
-        {"X-Forwarded-User": "alice@example.com",
-         "X-Forwarded-Groups": "platform-admins"},
+        {"X-Forwarded-User": "alice@example.com", "X-Forwarded-Groups": "platform-admins"},
         _proxy_config(),
     )
     assert spoofed is None
@@ -334,8 +335,7 @@ def test_groups_map_to_scopes_and_unknown_groups_grant_nothing():
 def test_multiple_groups_union_their_scopes():
     principal = proxy_identity(
         "10.0.0.9",
-        {"X-Forwarded-User": "carol",
-         "X-Forwarded-Groups": "viewers, platform-admins"},
+        {"X-Forwarded-User": "carol", "X-Forwarded-Groups": "viewers, platform-admins"},
         _proxy_config(),
     )
     assert principal.has(ADMIN)
@@ -352,15 +352,21 @@ def test_the_tenant_header_is_honoured_from_a_trusted_proxy():
 
 
 def test_a_missing_user_header_yields_no_identity():
-    assert proxy_identity("10.0.0.9", {"X-Forwarded-Groups": "viewers"},
-                          _proxy_config()) is None
+    assert (
+        proxy_identity("10.0.0.9", {"X-Forwarded-Groups": "viewers"}, _proxy_config())
+        is None
+    )
 
 
 def test_proxy_identity_is_off_unless_enabled():
-    assert proxy_identity(
-        "10.0.0.9", {"X-Forwarded-User": "alice"},
-        ProxyIdentityConfig(enabled=False, trusted_proxies=("10.0.0.9",)),
-    ) is None
+    assert (
+        proxy_identity(
+            "10.0.0.9",
+            {"X-Forwarded-User": "alice"},
+            ProxyIdentityConfig(enabled=False, trusted_proxies=("10.0.0.9",)),
+        )
+        is None
+    )
 
 
 def test_header_matching_is_case_insensitive():
@@ -375,6 +381,11 @@ def test_no_password_handling_exists_anywhere_in_this_module():
     import orchestrator.api.tokens as module
 
     source = Path(module.__file__).read_text(encoding="utf-8").lower()
-    for forbidden in ("def verify_password", "password_hash", "bcrypt",
-                      "argon2", "def login("):
+    for forbidden in (
+        "def verify_password",
+        "password_hash",
+        "bcrypt",
+        "argon2",
+        "def login(",
+    ):
         assert forbidden not in source, f"password handling crept in: {forbidden}"

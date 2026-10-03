@@ -49,7 +49,6 @@ from orchestrator.recovery.strategies import RecoveryPolicy, select
 from orchestrator.validation.gates import GateRunner, can_complete
 from orchestrator.validation.validators import ValidationContext, ValidatorRegistry
 
-
 # -- model routing ---------------------------------------------------------
 
 
@@ -78,17 +77,21 @@ def test_routing_selects_by_capability_not_by_name():
             ),
         ]
     )
-    chosen = router.select(
-        RoutingRequirements(capabilities=[ModelCapability.TOOL_CALLING])
-    )
+    chosen = router.select(RoutingRequirements(capabilities=[ModelCapability.TOOL_CALLING]))
     assert chosen.provider.name == "capable"
 
 
 def test_routing_respects_the_context_window_requirement():
     router = ModelRouter(
         [
-            _provider("short", capabilities=[ModelCapability.TEXT_GENERATION], context_window=4000),
-            _provider("long", capabilities=[ModelCapability.TEXT_GENERATION], context_window=200000),
+            _provider(
+                "short", capabilities=[ModelCapability.TEXT_GENERATION], context_window=4000
+            ),
+            _provider(
+                "long",
+                capabilities=[ModelCapability.TEXT_GENERATION],
+                context_window=200000,
+            ),
         ]
     )
     chosen = router.select(RoutingRequirements(min_context_tokens=100000))
@@ -96,7 +99,9 @@ def test_routing_respects_the_context_window_requirement():
 
 
 def test_routing_raises_when_nothing_is_capable():
-    router = ModelRouter([_provider("text", capabilities=[ModelCapability.TEXT_GENERATION])])
+    router = ModelRouter(
+        [_provider("text", capabilities=[ModelCapability.TEXT_GENERATION])]
+    )
     with pytest.raises(NoCapableModel):
         router.select(RoutingRequirements(capabilities=[ModelCapability.VISION]))
 
@@ -124,7 +129,9 @@ def test_a_failed_model_is_cooled_off_and_not_reselected():
         priority=1,
         responses=[ModelUnavailable("down"), ModelUnavailable("still down")],
     )
-    working = _provider("working", capabilities=[ModelCapability.TEXT_GENERATION], priority=2)
+    working = _provider(
+        "working", capabilities=[ModelCapability.TEXT_GENERATION], priority=2
+    )
     router = ModelRouter([broken, working])
 
     async def scenario():
@@ -190,9 +197,19 @@ def test_budget_reserves_output_and_a_safety_margin():
 
 def test_compaction_drops_the_least_relevant_first_and_keeps_pinned():
     items = [
-        ContextItem(kind=ContextKind.OBJECTIVE, label="objective", content="o" * 400, relevance=1.0, pinned=True),
-        ContextItem(kind=ContextKind.HISTORY, label="old", content="x" * 4000, relevance=0.1),
-        ContextItem(kind=ContextKind.RESULT, label="result", content="r" * 400, relevance=0.9),
+        ContextItem(
+            kind=ContextKind.OBJECTIVE,
+            label="objective",
+            content="o" * 400,
+            relevance=1.0,
+            pinned=True,
+        ),
+        ContextItem(
+            kind=ContextKind.HISTORY, label="old", content="x" * 4000, relevance=0.1
+        ),
+        ContextItem(
+            kind=ContextKind.RESULT, label="result", content="r" * 400, relevance=0.9
+        ),
     ]
     kept, report = compact(items, 300)
     labels = {item.label for item in kept}
@@ -258,9 +275,7 @@ def test_large_dependency_output_is_referenced_not_inlined():
     execution.tasks[upstream.id] = upstream
     execution.tasks[downstream.id] = downstream
 
-    items = ContextManager().collect(
-        ContextRequest(execution=execution, task=downstream)
-    )
+    items = ContextManager().collect(ContextRequest(execution=execution, task=downstream))
     result_items = [i for i in items if i.kind is ContextKind.RESULT]
     assert result_items
     assert "more characters" in result_items[0].content
@@ -636,7 +651,9 @@ def test_planner_drops_dependencies_it_cannot_resolve():
     router = ModelRouter([CallableProvider(dangling)])
     execution = Execution(objective="anything")
     plan = run(
-        Planner(router=router).plan(execution, choose(execution.objective), PlanningContext())
+        Planner(router=router).plan(
+            execution, choose(execution.objective), PlanningContext()
+        )
     )
     assert plan.tasks[0].dependencies == []
 
@@ -680,7 +697,9 @@ def test_goal_analysis_separates_assumptions_from_requirements():
             "success_criteria": [{"description": "A report exists"}],
         }
 
-    analysis = run(GoalAnalyzer(ModelRouter([CallableProvider(analyse)])).analyze("Ship it"))
+    analysis = run(
+        GoalAnalyzer(ModelRouter([CallableProvider(analyse)])).analyze("Ship it")
+    )
     requirements = analysis.requirements
     assert requirements.explicit == ["Ship the report"]
     assert "The data is already collected" in requirements.assumptions
@@ -697,9 +716,7 @@ def test_goal_analysis_works_without_a_model():
 def test_success_criteria_survive_into_the_objective_gate():
     execution = Execution(objective="o")
     execution.requirements = Requirements(
-        success_criteria=[
-            SuccessCriterion(description="must exist", validator="non_empty")
-        ]
+        success_criteria=[SuccessCriterion(description="must exist", validator="non_empty")]
     )
     task = make_task("t")
     task.status = TaskStatus.SUCCEEDED

@@ -9,8 +9,8 @@ creating a specialist, and that decision carries an explicit cost/benefit test
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Sequence
 
 from ..core.domain.models import AgentSpec, Task
 from ..errors import NoCapableAgent
@@ -125,7 +125,9 @@ class AgentSelector:
             )
         agent = self.create_agent(task, unmet)
         rationale = (
-            "no registered agent covered " + ", ".join(unmet) + "; created a scoped specialist"
+            "no registered agent covered "
+            + ", ".join(unmet)
+            + "; created a scoped specialist"
             if unmet
             else "no agents are registered; created a worker scoped to this task"
         )
@@ -155,9 +157,7 @@ class AgentSelector:
         tools = sorted(set(requirements.tools) | set(task.allowed_tools))
         agent = AgentSpec(
             id=f"dynamic:{task.name or task.id}",
-            description=(
-                f"Ephemeral specialist created for task {task.name or task.id}."
-            ),
+            description=(f"Ephemeral specialist created for task {task.name or task.id}."),
             capabilities=required,
             tools=tools,
             skills=list(requirements.skills),

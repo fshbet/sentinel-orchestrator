@@ -71,7 +71,11 @@ DEFAULTS: dict[str, Any] = {
         "allow_human_escalation": True,
     },
     "context": {"max_working_memory": 500},
-    "plugins": {"enabled": True, "entry_point_group": "orchestrator.plugins", "modules": []},
+    "plugins": {
+        "enabled": True,
+        "entry_point_group": "orchestrator.plugins",
+        "modules": [],
+    },
     "api": {"host": "127.0.0.1", "port": 8080},
 }
 
@@ -283,20 +287,21 @@ def _from_environment() -> dict[str, Any]:
     return overlay
 
 
-
 # What a `storage.postgres` block may contain.
 #
 # An allowlist rather than a denylist of credential-shaped names. A denylist
 # has to anticipate every spelling somebody might use for "password", and it
 # only takes one it did not anticipate — `connection_string` would sail
 # through a list that blocks `dsn` and `url`.
-_POSTGRES_KEYS = frozenset({
-    "dsn_env",
-    "min_connections",
-    "max_connections",
-    "command_timeout",
-    "apply_migrations",
-})
+_POSTGRES_KEYS = frozenset(
+    {
+        "dsn_env",
+        "min_connections",
+        "max_connections",
+        "command_timeout",
+        "apply_migrations",
+    }
+)
 
 # Ranges. Each bound exists because the value outside it is either useless or
 # a foot-gun: a pool of zero never connects, a pool of a thousand exhausts

@@ -9,8 +9,9 @@ model call with its own cost and failure mode (spec section 22).
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Sequence
+from typing import Any
 
 from ..core.domain.enums import ContextKind
 from .budget import estimate_text_tokens
@@ -130,9 +131,7 @@ def compact(
     guard = 0
     while total_tokens(working) > max_tokens and guard < 200:
         guard += 1
-        candidates = sorted(
-            working, key=lambda item: (item.pinned, -item.tokens)
-        )
+        candidates = sorted(working, key=lambda item: (item.pinned, -item.tokens))
         target = candidates[0]
         overflow = total_tokens(working) - max_tokens
         allowed = max(min_item_tokens, target.tokens - overflow)

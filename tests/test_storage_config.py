@@ -57,7 +57,8 @@ def test_every_documented_backend_loads(tmp_path):
     for backend in ("sqlite", "memory", "postgres"):
         extra = (
             "  postgres:\n    dsn_env: ORCHESTRATOR_POSTGRES_DSN\n"
-            if backend == "postgres" else ""
+            if backend == "postgres"
+            else ""
         )
         config = _load(
             tmp_path,
@@ -84,13 +85,16 @@ def test_an_unknown_backend_is_rejected_and_names_the_real_ones(tmp_path):
 def test_a_plaintext_credential_field_is_rejected(tmp_path, field):
     """A DSN carries a password and a config file gets committed."""
     with pytest.raises(ConfigurationError) as exc:
-        _load(tmp_path, f"""profile: production
+        _load(
+            tmp_path,
+            f"""profile: production
 storage:
   backend: postgres
   postgres:
     dsn_env: ORCHESTRATOR_POSTGRES_DSN
     {field}: postgresql://user:hunter2@host/db
-""")
+""",
+        )
     message = str(exc.value)
     assert f"storage.postgres.{field}" in message
     assert "dsn_env" in message, "the error must say what to use instead"
@@ -101,13 +105,16 @@ storage:
 def test_an_unknown_key_in_the_postgres_block_is_rejected(tmp_path):
     """An allowlist, not a denylist: a typo'd secret field would slip a denylist."""
     with pytest.raises(ConfigurationError) as exc:
-        _load(tmp_path, """profile: production
+        _load(
+            tmp_path,
+            """profile: production
 storage:
   backend: postgres
   postgres:
     dsn_env: ORCHESTRATOR_POSTGRES_DSN
     connection_string: postgresql://user:hunter2@host/db
-""")
+""",
+        )
     message = str(exc.value)
     assert "connection_string" in message
     assert "hunter2" not in message
@@ -120,27 +127,32 @@ def test_dsn_env_is_required(tmp_path):
 
 
 def test_dsn_env_must_be_a_valid_variable_name(tmp_path):
-    for bad in ("has spaces", "lower-case-dashes", "1STARTS_WITH_DIGIT",
-                "has$dollar", ""):
+    for bad in ("has spaces", "lower-case-dashes", "1STARTS_WITH_DIGIT", "has$dollar", ""):
         with pytest.raises(ConfigurationError) as exc:
-            _load(tmp_path, f"""profile: production
+            _load(
+                tmp_path,
+                f"""profile: production
 storage:
   backend: postgres
   postgres:
     dsn_env: "{bad}"
-""")
+""",
+            )
         assert "dsn_env" in str(exc.value), bad
 
 
 def test_a_dsn_env_that_looks_like_a_dsn_is_rejected(tmp_path):
     """The commonest mistake: pasting the DSN where the variable name goes."""
     with pytest.raises(ConfigurationError) as exc:
-        _load(tmp_path, """profile: production
+        _load(
+            tmp_path,
+            """profile: production
 storage:
   backend: postgres
   postgres:
     dsn_env: postgresql://user:hunter2@host:5432/db
-""")
+""",
+        )
     message = str(exc.value)
     assert "dsn_env" in message
     assert "hunter2" not in message
@@ -151,51 +163,63 @@ storage:
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("key,value", [
-    ("min_connections", 0),
-    ("min_connections", -1),
-    ("max_connections", 0),
-    ("max_connections", -5),
-    ("max_connections", 1001),
-    ("command_timeout", 0),
-    ("command_timeout", -1),
-    ("command_timeout", 4000),
-])
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("min_connections", 0),
+        ("min_connections", -1),
+        ("max_connections", 0),
+        ("max_connections", -5),
+        ("max_connections", 1001),
+        ("command_timeout", 0),
+        ("command_timeout", -1),
+        ("command_timeout", 4000),
+    ],
+)
 def test_an_out_of_range_pool_or_timeout_value_is_rejected(tmp_path, key, value):
     with pytest.raises(ConfigurationError) as exc:
-        _load(tmp_path, f"""profile: production
+        _load(
+            tmp_path,
+            f"""profile: production
 storage:
   backend: postgres
   postgres:
     dsn_env: ORCHESTRATOR_POSTGRES_DSN
     {key}: {value}
-""")
+""",
+        )
     assert f"storage.postgres.{key}" in str(exc.value)
 
 
 def test_min_connections_may_not_exceed_max(tmp_path):
     """asyncpg raises at connect time; catching it at config time is cheaper."""
     with pytest.raises(ConfigurationError) as exc:
-        _load(tmp_path, """profile: production
+        _load(
+            tmp_path,
+            """profile: production
 storage:
   backend: postgres
   postgres:
     dsn_env: ORCHESTRATOR_POSTGRES_DSN
     min_connections: 10
     max_connections: 5
-""")
+""",
+        )
     assert "min_connections" in str(exc.value)
 
 
 def test_a_non_numeric_pool_value_is_rejected(tmp_path):
     with pytest.raises(ConfigurationError) as exc:
-        _load(tmp_path, """profile: production
+        _load(
+            tmp_path,
+            """profile: production
 storage:
   backend: postgres
   postgres:
     dsn_env: ORCHESTRATOR_POSTGRES_DSN
     max_connections: "lots"
-""")
+""",
+        )
     assert "max_connections" in str(exc.value)
 
 
@@ -209,12 +233,15 @@ def test_sensible_values_are_accepted(tmp_path):
 
 def test_the_postgres_block_is_ignored_for_other_backends(tmp_path):
     """A leftover block must not fail a config that does not use it."""
-    config = _load(tmp_path, """profile: development
+    config = _load(
+        tmp_path,
+        """profile: development
 storage:
   backend: sqlite
   postgres:
     dsn_env: SOMETHING_UNSET
-""")
+""",
+    )
     assert config.get("storage.backend") == "sqlite"
 
 

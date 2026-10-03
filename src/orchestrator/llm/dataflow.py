@@ -255,15 +255,11 @@ class DataFlowPolicy:
         # one provider actually declared in config. An explicit
         # ``data.enforce_egress_policy`` overrides in either direction.
         profile = getattr(config, "profile", None)
-        profile_wants = bool(
-            getattr(profile, "name", "development") != "development"
-        )
+        profile_wants = bool(getattr(profile, "name", "development") != "development")
         declared = bool(providers)
 
         explicit = section.get("enforce_egress_policy")
-        enabled = bool(explicit) if explicit is not None else (
-            profile_wants and declared
-        )
+        enabled = bool(explicit) if explicit is not None else (profile_wants and declared)
 
         return cls(
             providers,

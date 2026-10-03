@@ -8,13 +8,13 @@ rather than a hope about model behaviour (spec sections 26 and 73).
 
 from __future__ import annotations
 
+from ...errors import InvalidStateTransition
 from ..domain.enums import (
     TERMINAL_EXECUTION_STATUSES,
     TERMINAL_TASK_STATUSES,
     ExecutionStatus,
     TaskStatus,
 )
-from ...errors import InvalidStateTransition
 
 # Execution lifecycle. Read as: from -> allowed next states.
 EXECUTION_TRANSITIONS: dict[ExecutionStatus, frozenset[ExecutionStatus]] = {

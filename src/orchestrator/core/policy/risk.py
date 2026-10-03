@@ -103,7 +103,10 @@ class RiskEngine:
 
         # A declared risk is a floor, never a ceiling: a tool may say it is
         # dangerous, but it may not talk itself down.
-        if operation.declared_risk is not None and operation.declared_risk.rank > level.rank:
+        if (
+            operation.declared_risk is not None
+            and operation.declared_risk.rank > level.rank
+        ):
             level = operation.declared_risk
             factors.append("declared_risk")
 
@@ -122,7 +125,9 @@ class RiskEngine:
             external_effect=any(
                 p.startswith(("network", "http", "external", "mcp")) for p in lowered
             ),
-            writes_data=any(p.startswith(("write", "fs.write", "db.write")) for p in lowered),
+            writes_data=any(
+                p.startswith(("write", "fs.write", "db.write")) for p in lowered
+            ),
             reads_sensitive_data=any("secret" in p or "credential" in p for p in lowered),
             financial_effect=any("payment" in p or "financial" in p for p in lowered),
             security_effect=any("admin" in p or "security" in p for p in lowered),

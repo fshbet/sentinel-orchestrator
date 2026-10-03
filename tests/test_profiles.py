@@ -16,7 +16,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from orchestrator.config import profiles
 from orchestrator.config.loader import Config
-from orchestrator.core.domain.enums import RiskLevel
 from orchestrator.core.policy.engine import OperationDescriptor
 from orchestrator.errors import ConfigurationError
 from orchestrator.platform import _build_policy
@@ -130,37 +129,37 @@ def test_posture_reports_where_each_value_came_from():
 
 def test_production_policy_denies_an_ungranted_tool():
     policy = _build_policy(Config({"profile": "production"}))
-    decision = policy.evaluate(
-        _operation("fs.read_file"), granted_permissions=["fs.read"]
-    )
+    decision = policy.evaluate(_operation("fs.read_file"), granted_permissions=["fs.read"])
     assert decision.allowed is False
     assert "explicit" in decision.reason.lower() or "default" in decision.reason.lower()
 
 
 def test_production_policy_allows_a_tool_that_was_explicitly_granted():
     policy = _build_policy(
-        Config({
-            "profile": "production",
-            "policy": {
-                "rules": [
-                    {"kind": "tool", "subject": "fs.read_file", "effect": "allow",
-                     "reason": "explicitly granted for this deployment"}
-                ]
-            },
-        })
+        Config(
+            {
+                "profile": "production",
+                "policy": {
+                    "rules": [
+                        {
+                            "kind": "tool",
+                            "subject": "fs.read_file",
+                            "effect": "allow",
+                            "reason": "explicitly granted for this deployment",
+                        }
+                    ]
+                },
+            }
+        )
     )
-    decision = policy.evaluate(
-        _operation("fs.read_file"), granted_permissions=["fs.read"]
-    )
+    decision = policy.evaluate(_operation("fs.read_file"), granted_permissions=["fs.read"])
     assert decision.allowed is True
 
 
 def test_development_policy_allows_the_same_ungranted_tool():
     """The difference between the profiles has to be observable, or it is fiction."""
     policy = _build_policy(Config({"profile": "development"}))
-    decision = policy.evaluate(
-        _operation("fs.read_file"), granted_permissions=["fs.read"]
-    )
+    decision = policy.evaluate(_operation("fs.read_file"), granted_permissions=["fs.read"])
     assert decision.allowed is True
 
 
@@ -243,8 +242,7 @@ def test_a_loaded_production_config_really_denies_by_default(tmp_path):
 
     policy = _build_policy(config)
     assert policy.config.default_effect == "deny"
-    decision = policy.evaluate(_operation("fs.read_file"),
-                               granted_permissions=["fs.read"])
+    decision = policy.evaluate(_operation("fs.read_file"), granted_permissions=["fs.read"])
     assert decision.allowed is False
 
 
@@ -252,8 +250,10 @@ def test_a_loaded_development_config_really_allows(tmp_path):
     config = _loaded(tmp_path, "profile: development\nstorage:\n  backend: memory\n")
     policy = _build_policy(config)
     assert policy.config.default_effect == "allow"
-    assert policy.evaluate(_operation("fs.read_file"),
-                           granted_permissions=["fs.read"]).allowed is True
+    assert (
+        policy.evaluate(_operation("fs.read_file"), granted_permissions=["fs.read"]).allowed
+        is True
+    )
 
 
 def test_a_loaded_config_with_no_profile_denies(tmp_path):

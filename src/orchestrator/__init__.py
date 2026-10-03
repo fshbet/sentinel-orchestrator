@@ -17,7 +17,8 @@ Typical use::
     print(execution.status, execution.summary)
 """
 
-from .config.loader import Config, load as load_config
+from .config.loader import Config
+from .config.loader import load as load_config
 from .core.domain.enums import (
     Confidence,
     ExecutionStatus,

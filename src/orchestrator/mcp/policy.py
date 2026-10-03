@@ -11,8 +11,9 @@ delete tool is read-only does not get believed.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any
 
 from ..core.domain.enums import RiskLevel
 from ..core.policy.engine import PolicyDecision, PolicyEngine

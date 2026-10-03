@@ -11,8 +11,9 @@ inlined, so a 40MB result does not have to pass through a prompt to be usable.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any
 
 from ..core.domain.enums import ContextKind, MemoryTier
 from ..core.domain.models import Artifact, Execution, ModelSpec, Task
@@ -20,7 +21,13 @@ from ..llm.base import CompletionRequest, Message
 from ..observability.audit import AuditLog, EventType
 from ..validation.validators import describe_expectation
 from .budget import ContextBudget, estimate_tokens
-from .compaction import CompactionReport, ContextItem, Summariser, compact, compact_with_summariser
+from .compaction import (
+    CompactionReport,
+    ContextItem,
+    Summariser,
+    compact,
+    compact_with_summariser,
+)
 from .memory import MemoryStore
 
 # Values longer than this are referenced instead of inlined.
@@ -145,9 +152,7 @@ class ContextManager:
             query = request.memory_query or (
                 task.objective if task is not None else execution.objective
             )
-            recalled = self.memory.recall(
-                query, execution_id=execution.id, limit=6
-            )
+            recalled = self.memory.recall(query, execution_id=execution.id, limit=6)
             if recalled:
                 items.append(
                     ContextItem(
@@ -192,9 +197,7 @@ class ContextManager:
             # cannot pass — the check and the instruction have to travel
             # together or they drift apart.
             expectations = [
-                text
-                for text in (describe_expectation(v) for v in task.validations)
-                if text
+                text for text in (describe_expectation(v) for v in task.validations) if text
             ]
             if expectations:
                 lines.append(
@@ -264,9 +267,7 @@ class ContextManager:
         available = max(256, available)
 
         if self.summariser is not None:
-            items, report = await compact_with_summariser(
-                items, available, self.summariser
-            )
+            items, report = await compact_with_summariser(items, available, self.summariser)
         else:
             items, report = compact(items, available)
 

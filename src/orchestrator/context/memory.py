@@ -13,9 +13,10 @@ without changing any caller.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any
 
 from ..core.domain.enums import MemoryTier
 from ..core.domain.ids import new_id
@@ -69,9 +70,7 @@ def lexical_score(query: str, entry: MemoryEntry) -> float:
     key_terms = _tokenize(entry.key)
     body_terms = _tokenize(entry.summary or str(entry.value))
     key_overlap = len(query_terms & key_terms) / len(query_terms)
-    body_overlap = (
-        len(query_terms & body_terms) / len(query_terms) if body_terms else 0.0
-    )
+    body_overlap = len(query_terms & body_terms) / len(query_terms) if body_terms else 0.0
     tag_overlap = len(query_terms & _tokenize(" ".join(entry.tags))) / len(query_terms)
     return key_overlap * 2.0 + body_overlap + tag_overlap * 0.5
 
@@ -108,7 +107,11 @@ class MemoryStore:
         )
         # A repeated key in the same tier updates rather than accumulating.
         for existing in list(self._entries.values()):
-            if existing.key == key and existing.tier is tier and existing.execution_id == execution_id:
+            if (
+                existing.key == key
+                and existing.tier is tier
+                and existing.execution_id == execution_id
+            ):
                 del self._entries[existing.id]
         self._entries[entry.id] = entry
         self._evict()
@@ -117,7 +120,9 @@ class MemoryStore:
     def forget(self, entry_id: str) -> None:
         self._entries.pop(entry_id, None)
 
-    def clear(self, *, tier: MemoryTier | None = None, execution_id: str | None = None) -> int:
+    def clear(
+        self, *, tier: MemoryTier | None = None, execution_id: str | None = None
+    ) -> int:
         doomed = [
             entry_id
             for entry_id, entry in self._entries.items()

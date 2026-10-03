@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from ..errors import MCPError, MCPProtocolError
 from .transport import Transport, TransportInfo, open_transport
@@ -44,7 +45,7 @@ class MCPTool:
     title: str = ""
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "MCPTool":
+    def from_dict(cls, data: dict[str, Any]) -> MCPTool:
         return cls(
             name=str(data.get("name", "")),
             description=str(data.get("description", "")),
@@ -63,7 +64,7 @@ class MCPResource:
     mime_type: str | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "MCPResource":
+    def from_dict(cls, data: dict[str, Any]) -> MCPResource:
         return cls(
             uri=str(data.get("uri", "")),
             name=str(data.get("name", "")),
@@ -79,7 +80,7 @@ class MCPPrompt:
     arguments: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "MCPPrompt":
+    def from_dict(cls, data: dict[str, Any]) -> MCPPrompt:
         return cls(
             name=str(data.get("name", "")),
             description=str(data.get("description", "")),
@@ -146,9 +147,11 @@ class MCPClient:
     @classmethod
     async def connect(
         cls, server_id: str, config: dict[str, Any], **kwargs: Any
-    ) -> "MCPClient":
+    ) -> MCPClient:
         transport = await open_transport(config)
-        client = cls(server_id, transport, timeout=float(config.get("timeout", 60.0)), **kwargs)
+        client = cls(
+            server_id, transport, timeout=float(config.get("timeout", 60.0)), **kwargs
+        )
         await client.initialize()
         return client
 

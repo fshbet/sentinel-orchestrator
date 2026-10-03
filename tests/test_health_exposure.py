@@ -52,17 +52,28 @@ DISCLOSURE_MARKERS = (
 
 
 def _client():
-    registry = IdentityRegistry([
-        TokenPrincipal("admin-token", Principal(
-            id="admin", scopes=expand_scopes([ADMIN]), token_id="ENV_ADMIN")),
-        TokenPrincipal("reader-token", Principal(
-            id="reader", scopes=expand_scopes([EXECUTIONS_READ]),
-            token_id="ENV_READER")),
-    ])
-    return TestClient(create_app(
-        security=SecurityConfig(host="0.0.0.0", tokens=("unused",)),
-        identity_registry=registry,
-    ))
+    registry = IdentityRegistry(
+        [
+            TokenPrincipal(
+                "admin-token",
+                Principal(id="admin", scopes=expand_scopes([ADMIN]), token_id="ENV_ADMIN"),
+            ),
+            TokenPrincipal(
+                "reader-token",
+                Principal(
+                    id="reader",
+                    scopes=expand_scopes([EXECUTIONS_READ]),
+                    token_id="ENV_READER",
+                ),
+            ),
+        ]
+    )
+    return TestClient(
+        create_app(
+            security=SecurityConfig(host="0.0.0.0", tokens=("unused",)),
+            identity_registry=registry,
+        )
+    )
 
 
 def _auth(token):
@@ -235,17 +246,25 @@ def test_the_metrics_endpoint_renders_the_apps_collector():
     collector = Metrics()
     collector.execution_finished("completed", "confirmed", 1.0)
 
-    registry = IdentityRegistry([
-        TokenPrincipal("admin-token", Principal(
-            id="admin", scopes=expand_scopes([ADMIN]), token_id="ENV_ADMIN")),
-    ])
-    client = TestClient(create_app(
-        security=SecurityConfig(host="0.0.0.0", tokens=("unused",)),
-        identity_registry=registry,
-        metrics_collector=collector,
-    ))
+    registry = IdentityRegistry(
+        [
+            TokenPrincipal(
+                "admin-token",
+                Principal(id="admin", scopes=expand_scopes([ADMIN]), token_id="ENV_ADMIN"),
+            ),
+        ]
+    )
+    client = TestClient(
+        create_app(
+            security=SecurityConfig(host="0.0.0.0", tokens=("unused",)),
+            identity_registry=registry,
+            metrics_collector=collector,
+        )
+    )
     body = client.get("/metrics", headers=_auth("admin-token")).text
-    assert 'orchestrator_executions_total{confidence="confirmed",status="completed"} 1' in body
+    assert (
+        'orchestrator_executions_total{confidence="confirmed",status="completed"} 1' in body
+    )
 
 
 def test_a_failing_gauge_refresh_still_serves_the_recorded_counters():
@@ -255,10 +274,14 @@ def test_a_failing_gauge_refresh_still_serves_the_recorded_counters():
     collector = Metrics()
     collector.security_event("authentication")
 
-    registry = IdentityRegistry([
-        TokenPrincipal("admin-token", Principal(
-            id="admin", scopes=expand_scopes([ADMIN]), token_id="ENV_ADMIN")),
-    ])
+    registry = IdentityRegistry(
+        [
+            TokenPrincipal(
+                "admin-token",
+                Principal(id="admin", scopes=expand_scopes([ADMIN]), token_id="ENV_ADMIN"),
+            ),
+        ]
+    )
     app = create_app(
         security=SecurityConfig(host="0.0.0.0", tokens=("unused",)),
         identity_registry=registry,

@@ -137,7 +137,8 @@ async def _count_auth_failure(limiter, client: str) -> None:
         from .ratelimit import STRICT_CATEGORIES
 
         await _check_limit(
-            limiter, f"auth_failure:client:{client}",
+            limiter,
+            f"auth_failure:client:{client}",
             STRICT_CATEGORIES["auth_failure"],
         )
     except Exception:  # noqa: BLE001,S110 - counting must not break the 401
@@ -414,8 +415,7 @@ def install(
                     _record(metrics, "security_event", "authentication")
                     return JSONResponse(
                         status_code=401,
-                        headers={"WWW-Authenticate": "Bearer",
-                                 "X-Request-ID": request_id},
+                        headers={"WWW-Authenticate": "Bearer", "X-Request-ID": request_id},
                         content={
                             "error": "unauthorized",
                             "message": rejection,
@@ -440,8 +440,7 @@ def install(
                     )
                     return JSONResponse(
                         status_code=401,
-                        headers={"WWW-Authenticate": "Bearer",
-                                 "X-Request-ID": request_id},
+                        headers={"WWW-Authenticate": "Bearer", "X-Request-ID": request_id},
                         content={
                             "error": "unauthorized",
                             "message": (
