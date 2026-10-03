@@ -33,6 +33,13 @@ build/
 dist/
 .eggs/
 
+# Virtual environments. `python -m venv` writes a self-ignoring .gitignore
+# inside the directory it creates, but virtualenv and older tools do not, so
+# name them here rather than depend on that.
+.venv/
+venv/
+env/
+
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -42,6 +49,7 @@ htmlcov/
 
 # Evaluation and scan artefacts
 evaluation-report.json
+requirements-audit.txt
 evaluation-report.md
 sbom.json
 image-digest.txt

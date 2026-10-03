@@ -205,12 +205,18 @@ systems. Control operations stay behind `--allow-control`.
 
 ## Status
 
-701 tests. 699 pass where a PostgreSQL instance is reachable; without one,
-659 pass and 42 PostgreSQL-backed tests skip. Every subsystem is exercised
-against real stores, a real MCP server subprocess, and deliberate failure
-injection. The multi-replica controls — shared token revocation, shared rate
-limiting, egress enforcement, and the TLS boundary — are verified against the
-running production Compose stack by
+782 tests. 40 of them need a reachable PostgreSQL instance and skip without
+one; CI supplies one and fails the build if they skip there, because a gated
+suite that quietly skips proves nothing. A handful more are POSIX-only (file
+modes, symlinks) and skip on Windows. Every subsystem is exercised against real
+stores, a real MCP server subprocess, and deliberate failure injection.
+
+`ruff`, `ruff format` and `mypy` are clean across the whole tree, and the
+whole-tree type check gates the build rather than being reported and ignored.
+
+The multi-replica controls — shared token revocation, shared rate limiting,
+egress enforcement, and the TLS boundary — are verified against the running
+production Compose stack by
 [deployment/smoke-test.sh](deployment/smoke-test.sh), not only in unit tests.
 
 Known limitations are recorded honestly in

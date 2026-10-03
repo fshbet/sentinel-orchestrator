@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Install
-        run: pip install -e ".[api,yaml,http,dev]"
+        run: pip install -e ".[api,yaml,http,cli,dev]"
       - name: Test
         run: python -m pytest tests/ -q
 
@@ -127,7 +127,7 @@ jobs:
       - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
         with:
           python-version: "3.12"
-      - run: pip install -e ".[api,yaml,http,dev]" ruff mypy
+      - run: pip install -e ".[api,yaml,http,cli,dev,lint]"
       - name: Lint
         run: ruff check src/ tests/
       - name: Format check
@@ -138,10 +138,12 @@ jobs:
         run: |
           mapfile -t MODULES < <(grep -v '^#' typed-modules.txt | grep -v '^$')
           mypy "${MODULES[@]}"
-      - name: Type check (reported, not gating)
-        # The legacy remainder. Reported so the debt is visible and countable.
-        run: |
-          mypy src/orchestrator 2>&1 | tail -1 || true
+      - name: Type check (whole tree, gating)
+        # This used to be `|| true` while the remainder of the tree carried
+        # type debt. The debt is now zero, so the step gates: a check that
+        # cannot fail is a check that does nothing, and the only way the
+        # count stays at zero is if adding to it breaks the build.
+        run: mypy src/orchestrator
 
   dependency-audit:
     runs-on: ubuntu-latest
@@ -152,11 +154,16 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[api,yaml,http,postgres]" pip-audit
       - name: Known vulnerabilities in declared dependencies
-        # A fresh venv, so this audits *this project's* dependency surface
-        # rather than everything else on the runner image. Auditing the
-        # ambient environment produces findings for packages the project
-        # does not use, which trains people to ignore the job.
-        run: pip-audit --strict --desc -r <(pip freeze | grep -viE '^(pip|pip-audit)')
+        # Audits *this project's* dependency surface rather than everything
+        # else on the runner image, which would produce findings for packages
+        # the project does not use and train people to ignore the job.
+        # --exclude-editable drops this project itself: it is not on PyPI, and
+        # --strict makes a requirement it cannot resolve a failure.
+        run: |
+          pip freeze --exclude-editable | grep -viE '^(pip|pip-audit)==' > requirements-audit.txt || true
+          # An empty list would make the audit pass while checking nothing.
+          test -s requirements-audit.txt
+          pip-audit --strict --desc -r requirements-audit.txt
 
   static-security-analysis:
     runs-on: ubuntu-latest
@@ -262,14 +269,14 @@ jobs:
           ORCHESTRATOR_TEST_POSTGRES_DSN: >-
             postgresql://orchestrator:ci-only-not-a-real-secret@localhost:5432/orchestrator_test
         run: |
-          python -m pytest tests/test_postgres_store.py \n                          tests/test_shared_tokens.py -q
+          python -m pytest tests/test_postgres_store.py tests/test_shared_tokens.py -q
       - name: Nothing was skipped for want of a database
         env:
           ORCHESTRATOR_TEST_POSTGRES_DSN: >-
             postgresql://orchestrator:ci-only-not-a-real-secret@localhost:5432/orchestrator_test
         run: |
           # A gated suite that silently skips in CI proves nothing.
-          python -m pytest tests/test_postgres_store.py \n                          tests/test_shared_tokens.py -q 2>&1 | tee out.txt
+          python -m pytest tests/test_postgres_store.py tests/test_shared_tokens.py -q 2>&1 | tee out.txt
           if grep -qE '[0-9]+ skipped' out.txt; then
             echo "::error::PostgreSQL tests were skipped in CI"
             exit 1
@@ -285,7 +292,7 @@ jobs:
       - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
         with:
           python-version: "3.12"
-      - run: pip install -e ".[api,yaml,http,dev]"
+      - run: pip install -e ".[api,yaml,http,cli,dev]"
       - name: Security and policy cases must all pass
         run: python -m orchestrator.cli.main evaluate --suite security
       - name: Full suite with a quality floor

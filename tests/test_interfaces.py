@@ -20,7 +20,6 @@ from orchestrator.config.loader import (
 )
 from orchestrator.errors import ConfigurationError
 
-
 # -- configuration ---------------------------------------------------------
 
 
@@ -121,7 +120,7 @@ def test_a_plugin_can_add_a_tool_and_a_validator():
         module = Path(directory) / "orchestrator_test_plugin.py"
         module.write_text(
             textwrap.dedent(
-                '''
+                """
                 from orchestrator.core.domain.models import ToolSpec
                 from orchestrator.validation.validators import Validator
 
@@ -141,7 +140,7 @@ def test_a_plugin_can_add_a_tool_and_a_validator():
                         lambda arguments, context: "pong",
                     )
                     registry.add_validator(AlwaysPasses())
-                '''
+                """
             ),
             encoding="utf-8",
         )
@@ -200,11 +199,12 @@ def test_a_broken_plugin_is_reported_not_fatal():
 
 
 def test_the_subprocess_adapter_runs_an_external_worker():
+    from conftest import make_task
+
     from orchestrator.adapters.execution.subprocess_adapter import SubprocessAdapter
     from orchestrator.agents.runtime import AgentRunContext
     from orchestrator.core.domain.models import AgentSpec, Execution
     from orchestrator.core.policy.engine import PermissionScope
-    from conftest import make_task
 
     worker_source = textwrap.dedent(
         """
@@ -249,11 +249,12 @@ def test_the_subprocess_adapter_runs_an_external_worker():
 
 
 def test_an_adapter_that_does_not_claim_success_is_treated_as_failed():
+    from conftest import make_task
+
     from orchestrator.adapters.execution.base import ExecutionAdapter
     from orchestrator.agents.runtime import AgentRunContext
     from orchestrator.core.domain.models import AgentSpec, Execution
     from orchestrator.core.policy.engine import PermissionScope
-    from conftest import make_task
 
     execution = Execution(objective="o")
     task = make_task("t")
@@ -268,11 +269,12 @@ def test_an_adapter_that_does_not_claim_success_is_treated_as_failed():
 
 
 def test_a_failing_external_worker_is_reported_not_raised():
+    from conftest import make_task
+
     from orchestrator.adapters.execution.subprocess_adapter import SubprocessAdapter
     from orchestrator.agents.runtime import AgentRunContext
     from orchestrator.core.domain.models import AgentSpec, Execution
     from orchestrator.core.policy.engine import PermissionScope
-    from conftest import make_task
 
     adapter = SubprocessAdapter(["definitely-not-a-real-binary-xyz"])
     execution = Execution(objective="o")
@@ -370,7 +372,13 @@ def test_api_rejects_an_empty_objective():
 def test_api_exposes_registries_health_and_metrics():
     client, platform = _client()
     try:
-        for path in ("/v1/tools", "/v1/agents", "/v1/capabilities", "/v1/models", "/v1/mcp"):
+        for path in (
+            "/v1/tools",
+            "/v1/agents",
+            "/v1/capabilities",
+            "/v1/models",
+            "/v1/mcp",
+        ):
             assert client.get(path).status_code == 200
         health = client.get("/health")
         assert health.status_code == 200 and health.json()["status"] == "ok"
@@ -407,9 +415,18 @@ def _invoke(args, env=None, cwd=None):
     directory, so a test run from inside the repository would silently pick up
     the project's own .orchestrator/config.yaml. Passing an isolated directory
     is what keeps these tests hermetic.
+
+    The typer guard lives here rather than on each test: every CLI test routes
+    through this helper, so one check covers the ones below and the ones nobody
+    has written yet. Without it an install that skipped the ``cli`` extra fails
+    these tests instead of skipping them, which says nothing about the code.
     """
+    import importlib.util
     import os
     import subprocess
+
+    if importlib.util.find_spec("typer") is None:
+        pytest.skip("the CLI needs typer: pip install universal-orchestrator[cli]")
 
     environment = dict(os.environ)
     environment["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent / "src")
@@ -459,7 +476,9 @@ def test_cli_health_is_machine_readable():
 
 def test_cli_reports_an_unknown_execution_cleanly():
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
-        result = _invoke(["status", "exe_missing"], _cli_env(Path(directory)), cwd=directory)
+        result = _invoke(
+            ["status", "exe_missing"], _cli_env(Path(directory)), cwd=directory
+        )
     assert result.returncode == 1
     assert "not found" in result.stderr
 
