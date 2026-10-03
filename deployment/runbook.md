@@ -147,6 +147,62 @@ startup** — which is what you want during a rollback: the old binary declines
 to run rather than misreading rows the new one wrote. Plan a rollback that
 crosses a migration accordingly.
 
+## Where published artifacts go
+
+An agent publishes a deliverable with `orchestrator.emit_artifact`. The content
+is written as a file under `storage.artifact_dir`, one directory per execution:
+
+```
+<storage.artifact_dir>/<execution-id>/<artifact-name>
+```
+
+**Set `storage.artifact_dir` explicitly in production.** If it is absent the
+path is derived from `storage.path`, which for a PostgreSQL deployment is still
+the unused SQLite default — producing `.orchestrator/artifacts` inside a root
+filesystem that the production containers mount read-only. Publication then
+fails. It now fails *loudly*: `emit_artifact` raises, the task fails, and the
+run does not complete. Previously the error was swallowed and executions
+reported artifacts that existed nowhere.
+
+The supplied Compose stack mounts a named volume at
+`/var/lib/orchestrator/artifacts` into both replicas, so a file published
+through one replica is readable through the other. A one-shot `artifact-init`
+container chowns the volume to UID 10001 before either replica starts, because
+a named volume is created root-owned and the orchestrator runs unprivileged.
+
+The store is deliberately **not** inside the workspace and **not** beside the
+database:
+
+- publishing a result must not require write access to the application
+  directory, so `tools.filesystem.allow_write` can stay `false`;
+- a database restore must never silently replace delivered output.
+
+### Retrieving artifacts
+
+```bash
+docker compose -f deployment/docker-compose.production.yml \
+  exec orchestrator-1 ls /var/lib/orchestrator/artifacts/<execution-id>
+
+docker cp orchestrator-1:/var/lib/orchestrator/artifacts/<execution-id>/. ./out/
+```
+
+Each record carries the byte size and a SHA-256 of what was written, and the
+`artifact_exists` validator re-reads the file and compares both. A record whose
+file is missing, truncated, altered, or outside the configured store fails
+validation — an in-memory record alone no longer satisfies "a file was
+produced".
+
+### Backing artifacts up
+
+`pg_dump` does not include them; they are files, not rows.
+
+```bash
+docker run --rm -v orchestrator_orchestrator-artifacts:/a -v "$PWD:/backup" \
+  busybox tar czf /backup/artifacts-$(date +%F).tar.gz -C /a .
+```
+
+---
+
 ## Backup and restore
 
 ### PostgreSQL (multi-instance)
@@ -272,7 +328,7 @@ egress decisions name which provider received data at what classification.
 
 ```bash
 orchestrator validate            # posture, migration notices, config problems
-python -m pytest tests/ -q       # 701 tests; 42 skip without PostgreSQL
+python -m pytest tests/ -q       # 731 tests; 42 skip without PostgreSQL
 ```
 
 Then confirm by hand:

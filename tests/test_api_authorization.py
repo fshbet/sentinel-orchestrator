@@ -9,6 +9,7 @@ Two properties matter here and neither is provable by inspection:
 
 from __future__ import annotations
 
+import functools
 import sys
 from pathlib import Path
 
@@ -53,9 +54,35 @@ def _registry(*specs, multi_tenant=False):
     return IdentityRegistry(entries, multi_tenant=multi_tenant)
 
 
+# Isolation, and it matters more than it looks. create_app() with no
+# config_path discovers .orchestrator/config.yaml from the working directory -
+# which on a developer's machine is their real one, pointing at their real
+# SQLite database. These tests create executions, so every run of the suite
+# left "acme work" and "globex work" rows in the developer's own state, mixed
+# in with their actual runs. Tests get their own store.
+_ISOLATED_CONFIG = """profile: development
+storage:
+  backend: memory
+models:
+  providers: []
+"""
+
+
+@functools.cache
+def _isolated_config_path():
+    """A throwaway config, written once for this module."""
+    import tempfile
+
+    directory = tempfile.mkdtemp(prefix="orchestrator-api-auth-")
+    path = Path(directory) / "config.yaml"
+    path.write_text(_ISOLATED_CONFIG, encoding="utf-8")
+    return str(path)
+
+
 def _client(registry):
     return TestClient(
         create_app(
+            config_path=_isolated_config_path(),
             security=SecurityConfig(host="0.0.0.0", tokens=("unused",)),
             identity_registry=registry,
         )
@@ -101,8 +128,11 @@ def test_a_read_only_credential_cannot_start_an_execution():
 
     assert client.get("/v1/executions", headers=_auth("ro")).status_code == 200
 
-    denied = client.post("/v1/executions", headers=_auth("ro"),
-                         json={"objective": "do a thing", "run": False})
+    denied = client.post(
+        "/v1/executions",
+        headers=_auth("ro"),
+        json={"objective": "do a thing", "run": False},
+    )
     assert denied.status_code == 403
     assert denied.json()["required_scope"] == EXECUTIONS_WRITE
 
@@ -117,15 +147,17 @@ def test_a_read_only_credential_cannot_read_audit_trails():
 
 def test_a_read_only_credential_cannot_respond_to_approvals():
     client = _client(_registry(("ro", "reader", [EXECUTIONS_READ], "default")))
-    response = client.post("/v1/executions/x/approvals/y", headers=_auth("ro"),
-                           json={"approved": True})
+    response = client.post(
+        "/v1/executions/x/approvals/y", headers=_auth("ro"), json={"approved": True}
+    )
     assert response.status_code == 403
     assert response.json()["required_scope"] == APPROVALS_RESPOND
 
 
 def test_a_non_admin_credential_cannot_read_metrics():
-    client = _client(_registry(("rw", "writer",
-                                [EXECUTIONS_READ, EXECUTIONS_WRITE], "default")))
+    client = _client(
+        _registry(("rw", "writer", [EXECUTIONS_READ, EXECUTIONS_WRITE], "default"))
+    )
     assert client.get("/metrics", headers=_auth("rw")).status_code == 403
 
 
@@ -159,9 +191,9 @@ def test_every_response_carries_a_request_id():
 
 def test_a_supplied_request_id_is_preserved_for_correlation():
     client = _client(_registry(("adm", "admin", [ADMIN], "default")))
-    response = client.get("/v1/executions", headers={
-        **_auth("adm"), "X-Request-ID": "caller-supplied-id"
-    })
+    response = client.get(
+        "/v1/executions", headers={**_auth("adm"), "X-Request-ID": "caller-supplied-id"}
+    )
     assert response.headers["X-Request-ID"] == "caller-supplied-id"
 
 
@@ -171,8 +203,9 @@ def test_a_supplied_request_id_is_preserved_for_correlation():
 
 
 def _create(client, token, objective):
-    response = client.post("/v1/executions", headers=_auth(token),
-                           json={"objective": objective, "run": False})
+    response = client.post(
+        "/v1/executions", headers=_auth(token), json={"objective": objective, "run": False}
+    )
     assert response.status_code == 201, response.text
     return response.json()["id"]
 
@@ -190,34 +223,42 @@ def two_tenants():
 def test_one_tenant_cannot_read_another_tenants_execution(two_tenants):
     execution_id = _create(two_tenants, "acme-token", "acme private work")
 
-    assert two_tenants.get(f"/v1/executions/{execution_id}",
-                           headers=_auth("acme-token")).status_code == 200
+    assert (
+        two_tenants.get(
+            f"/v1/executions/{execution_id}", headers=_auth("acme-token")
+        ).status_code
+        == 200
+    )
 
     # 404 rather than 403: a 403 would confirm the id exists.
-    stolen = two_tenants.get(f"/v1/executions/{execution_id}",
-                             headers=_auth("globex-token"))
+    stolen = two_tenants.get(
+        f"/v1/executions/{execution_id}", headers=_auth("globex-token")
+    )
     assert stolen.status_code == 404
 
 
 def test_one_tenant_cannot_cancel_another_tenants_execution(two_tenants):
     execution_id = _create(two_tenants, "acme-token", "acme work")
-    response = two_tenants.post(f"/v1/executions/{execution_id}/cancel",
-                                headers=_auth("globex-token"))
+    response = two_tenants.post(
+        f"/v1/executions/{execution_id}/cancel", headers=_auth("globex-token")
+    )
     assert response.status_code == 404
 
 
 def test_one_tenant_cannot_pause_or_resume_another_tenants_execution(two_tenants):
     execution_id = _create(two_tenants, "acme-token", "acme work")
     for action in ("pause", "resume"):
-        response = two_tenants.post(f"/v1/executions/{execution_id}/{action}",
-                                    headers=_auth("globex-token"))
+        response = two_tenants.post(
+            f"/v1/executions/{execution_id}/{action}", headers=_auth("globex-token")
+        )
         assert response.status_code == 404, action
 
 
 def test_one_tenant_cannot_read_another_tenants_audit_trail(two_tenants):
     execution_id = _create(two_tenants, "acme-token", "acme work")
-    response = two_tenants.get(f"/v1/executions/{execution_id}/audit",
-                               headers=_auth("globex-token"))
+    response = two_tenants.get(
+        f"/v1/executions/{execution_id}/audit", headers=_auth("globex-token")
+    )
     assert response.status_code == 404
 
 
@@ -226,15 +267,19 @@ def test_listing_shows_only_the_callers_own_executions(two_tenants):
     globex_id = _create(two_tenants, "globex-token", "globex work")
 
     acme_ids = {
-        row["id"] for row in
-        two_tenants.get("/v1/executions", headers=_auth("acme-token")).json()["executions"]
+        row["id"]
+        for row in two_tenants.get("/v1/executions", headers=_auth("acme-token")).json()[
+            "executions"
+        ]
     }
     assert acme_id in acme_ids
     assert globex_id not in acme_ids
 
     globex_ids = {
-        row["id"] for row in
-        two_tenants.get("/v1/executions", headers=_auth("globex-token")).json()["executions"]
+        row["id"]
+        for row in two_tenants.get("/v1/executions", headers=_auth("globex-token")).json()[
+            "executions"
+        ]
     }
     assert globex_id in globex_ids
     assert acme_id not in globex_ids
@@ -242,8 +287,9 @@ def test_listing_shows_only_the_callers_own_executions(two_tenants):
 
 def test_ownership_is_recorded_on_the_execution(two_tenants):
     execution_id = _create(two_tenants, "acme-token", "acme work")
-    payload = two_tenants.get(f"/v1/executions/{execution_id}",
-                              headers=_auth("acme-token")).json()
+    payload = two_tenants.get(
+        f"/v1/executions/{execution_id}", headers=_auth("acme-token")
+    ).json()
     assert payload["id"] == execution_id
 
 
@@ -254,13 +300,16 @@ def test_ownership_is_recorded_on_the_execution(two_tenants):
 
 def test_single_tenant_mode_lets_principals_share_executions():
     """Simpler internal deployments should not have to think about tenancy."""
-    client = _client(_registry(
-        ("a", "alice", [ADMIN], "default"),
-        ("b", "bob", [ADMIN], "default"),
-    ))
+    client = _client(
+        _registry(
+            ("a", "alice", [ADMIN], "default"),
+            ("b", "bob", [ADMIN], "default"),
+        )
+    )
     execution_id = _create(client, "a", "shared work")
-    assert client.get(f"/v1/executions/{execution_id}",
-                      headers=_auth("b")).status_code == 200
+    assert (
+        client.get(f"/v1/executions/{execution_id}", headers=_auth("b")).status_code == 200
+    )
 
 
 # --------------------------------------------------------------------------
@@ -270,47 +319,52 @@ def test_single_tenant_mode_lets_principals_share_executions():
 
 def test_a_principal_must_name_an_environment_variable_not_a_token():
     with pytest.raises(ConfigurationError) as exc:
-        IdentityRegistry.from_config({
-            "principals": [{"id": "ci", "token": "literal-secret"}]
-        })
+        IdentityRegistry.from_config(
+            {"principals": [{"id": "ci", "token": "literal-secret"}]}
+        )
     assert "token_env" in str(exc.value)
 
 
 def test_an_unknown_scope_is_rejected(monkeypatch):
     monkeypatch.setenv("CI_TOKEN", "x")
     with pytest.raises(ConfigurationError) as exc:
-        IdentityRegistry.from_config({
-            "principals": [{"id": "ci", "token_env": "CI_TOKEN",
-                            "scopes": ["executions.destroy"]}]
-        })
+        IdentityRegistry.from_config(
+            {
+                "principals": [
+                    {"id": "ci", "token_env": "CI_TOKEN", "scopes": ["executions.destroy"]}
+                ]
+            }
+        )
     assert "executions.destroy" in str(exc.value)
 
 
 def test_a_tenant_cannot_be_set_without_enabling_multi_tenancy(monkeypatch):
     monkeypatch.setenv("CI_TOKEN", "x")
     with pytest.raises(ConfigurationError) as exc:
-        IdentityRegistry.from_config({
-            "tenancy": "single",
-            "principals": [{"id": "ci", "token_env": "CI_TOKEN", "tenant": "acme"}],
-        })
+        IdentityRegistry.from_config(
+            {
+                "tenancy": "single",
+                "principals": [{"id": "ci", "token_env": "CI_TOKEN", "tenant": "acme"}],
+            }
+        )
     assert "tenancy" in str(exc.value)
 
 
 def test_a_principal_whose_token_is_unset_is_skipped_not_fatal(monkeypatch):
     monkeypatch.delenv("MISSING_TOKEN", raising=False)
     monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
-    registry = IdentityRegistry.from_config({
-        "principals": [{"id": "ci", "token_env": "MISSING_TOKEN"}]
-    })
+    registry = IdentityRegistry.from_config(
+        {"principals": [{"id": "ci", "token_env": "MISSING_TOKEN"}]}
+    )
     assert len(registry) == 0
 
 
 def test_scopes_default_to_read_only(monkeypatch):
     monkeypatch.setenv("CI_TOKEN", "x")
     monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
-    registry = IdentityRegistry.from_config({
-        "principals": [{"id": "ci", "token_env": "CI_TOKEN"}]
-    })
+    registry = IdentityRegistry.from_config(
+        {"principals": [{"id": "ci", "token_env": "CI_TOKEN"}]}
+    )
     principal = registry.resolve("x")
     assert principal.has(EXECUTIONS_READ)
     assert not principal.has(EXECUTIONS_WRITE)
@@ -362,10 +416,7 @@ def test_a_principal_never_exposes_its_token():
 
 
 def _execution_scoped_routes(app):
-    return [
-        route for route in app.routes
-        if "{execution_id}" in getattr(route, "path", "")
-    ]
+    return [route for route in app.routes if "{execution_id}" in getattr(route, "path", "")]
 
 
 def test_every_execution_scoped_route_takes_the_request_for_an_ownership_check():
@@ -398,8 +449,7 @@ def test_every_execution_scoped_route_denies_a_foreign_tenant(two_tenants):
         ("POST", f"/v1/executions/{execution_id}/pause", None),
         ("POST", f"/v1/executions/{execution_id}/resume", None),
         ("POST", f"/v1/executions/{execution_id}/cancel", None),
-        ("POST", f"/v1/executions/{execution_id}/approvals/anything",
-         {"approved": True}),
+        ("POST", f"/v1/executions/{execution_id}/approvals/anything", {"approved": True}),
     ]
 
     leaked = []
@@ -460,10 +510,14 @@ def test_a_chunked_body_is_still_limited():
 
 
 def test_a_body_within_the_limit_is_accepted():
-    app = create_app(security=SecurityConfig(host="127.0.0.1", max_body_bytes=100_000))
+    app = create_app(
+        config_path=_isolated_config_path(),
+        security=SecurityConfig(host="127.0.0.1", max_body_bytes=100_000),
+    )
     client = TestClient(app)
-    response = client.post("/v1/executions",
-                           json={"objective": "small enough", "run": False})
+    response = client.post(
+        "/v1/executions", json={"objective": "small enough", "run": False}
+    )
     assert response.status_code == 201
 
 
@@ -527,9 +581,7 @@ def test_a_wildcard_cors_origin_is_refused():
     from orchestrator.api.security import InsecureBinding
 
     with pytest.raises(InsecureBinding):
-        create_app(security=SecurityConfig(
-            host="127.0.0.1", allowed_origins=("*",)
-        ))
+        create_app(security=SecurityConfig(host="127.0.0.1", allowed_origins=("*",)))
 
 
 def test_forwarded_headers_are_believed_only_from_a_trusted_proxy():
@@ -629,10 +681,10 @@ def test_an_unknown_backend_is_rejected_with_guidance():
 
 
 def test_a_rate_limited_caller_gets_429_with_retry_after():
+    from fastapi import FastAPI
+
     from orchestrator.api.ratelimit import InMemoryRateLimiter, RateLimit
     from orchestrator.api.security import SecurityConfig, install
-
-    from fastapi import FastAPI
 
     app = FastAPI()
     install(

@@ -564,6 +564,199 @@ details.audit[open] summary { border-bottom: 1px solid var(--color-border-subtle
     transition-duration: .01ms !important; scroll-behavior: auto !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Settings drawer.
+
+   A panel rather than a page: changing a key or a profile is something you do
+   in the middle of looking at a failed run, and losing the run to navigate to
+   settings is how you forget which key you were fixing.
+   --------------------------------------------------------------------------- */
+.drawer-backdrop {
+  position: fixed; inset: 0; z-index: var(--z-popover);
+  background: rgba(15, 23, 42, .45); display: flex; justify-content: flex-end;
+}
+.drawer-backdrop[hidden] { display: none; }
+.drawer {
+  width: min(560px, 100vw); height: 100%; overflow-y: auto;
+  background: var(--color-surface); border-left: 1px solid var(--color-border-subtle);
+  box-shadow: var(--shadow-xl); display: flex; flex-direction: column;
+  animation: drawerIn var(--duration-normal) var(--ease-spring-smooth);
+}
+@keyframes drawerIn { from { transform: translateX(24px); opacity: 0 } to { transform: none; opacity: 1 } }
+@media (prefers-reduced-motion: reduce) { .drawer { animation: none } }
+
+.drawer > header {
+  position: sticky; top: 0; z-index: 1;
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
+  padding: var(--space-5) var(--space-6);
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: var(--color-surface);
+}
+.drawer > header h2 { margin: 0; font-size: 1.05rem; }
+.drawer-body { padding: var(--space-6); display: flex; flex-direction: column; gap: var(--space-8); }
+
+.set-group > h3 {
+  margin: 0 0 var(--space-1); font-size: .95rem;
+}
+.set-group > .hint { margin: 0 0 var(--space-4); }
+
+/* Read-only notice: shown instead of guessing why a control did nothing. */
+.set-locked {
+  display: flex; gap: var(--space-3); align-items: flex-start;
+  border: 1px solid var(--color-warning);
+  background: var(--color-warning-surface);
+  color: var(--color-warning);
+  border-radius: var(--radius-lg); padding: var(--space-3) var(--space-4);
+  font-size: .85rem; line-height: 1.5; margin-bottom: var(--space-4);
+}
+
+/* Environment choices, as cards - the differences between them matter more
+   than the names, so each one carries its consequence. */
+.env-choice { display: flex; flex-direction: column; gap: var(--space-2); }
+.env-option {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-3);
+  align-items: start; text-align: left; width: 100%;
+  border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg);
+  padding: var(--space-3) var(--space-4); background: var(--color-surface);
+  cursor: pointer; font: inherit; color: inherit;
+  transition: border-color var(--duration-fast), background var(--duration-fast);
+}
+.env-option:hover:not(:disabled) { border-color: var(--color-border-interactive); }
+.env-option:disabled { cursor: not-allowed; opacity: .55; }
+.env-option[aria-checked="true"] {
+  border-color: var(--color-primary-500);
+  background: var(--color-primary-50);
+  box-shadow: var(--glow-primary);
+}
+.env-option .radio {
+  width: 16px; height: 16px; border-radius: 50%; margin-top: 3px;
+  border: 2px solid var(--color-border-interactive); flex: none;
+}
+.env-option[aria-checked="true"] .radio {
+  border-color: var(--color-primary-600);
+  background: radial-gradient(circle, var(--color-primary-600) 0 4px, transparent 5px);
+}
+/* The label and its consequence are separate lines. As inline spans they ran
+   together into "DevelopmentYour machine, your data", which reads as one
+   sentence and hides the thing the reader is choosing between. */
+.env-option > span:last-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.env-option .name { font-weight: 600; font-size: .9rem; display: block; }
+.env-option .what { font-size: .8rem; color: var(--color-text-secondary); line-height: 1.5; display: block; }
+
+/* Providers. */
+.provider {
+  border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg);
+  padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3);
+}
+.provider + .provider { margin-top: var(--space-3); }
+.provider-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.provider-head .name { font-weight: 600; font-size: .9rem; }
+.provider-head .url { font-size: .75rem; color: var(--color-text-secondary); word-break: break-all; }
+.key-row { display: flex; gap: var(--space-2); }
+.key-row input { flex: 1 1 auto; min-width: 0; }
+.key-note { font-size: .78rem; color: var(--color-text-secondary); line-height: 1.5; }
+.key-problem {
+  font-size: .8rem; line-height: 1.5;
+  color: var(--color-error); background: var(--color-error-surface);
+  border: 1px solid var(--color-error); border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+}
+
+/* Where things are saved. */
+.paths { display: flex; flex-direction: column; gap: var(--space-3); }
+.path-row {
+  display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: var(--space-3);
+  font-size: .82rem; align-items: baseline;
+}
+.path-row dt { color: var(--color-text-secondary); }
+.path-row dd {
+  margin: 0; font-family: var(--font-mono, ui-monospace, monospace);
+  word-break: break-all; color: var(--color-text-primary);
+}
+
+/* Delete affordance on a run row. Hidden until the row is hovered or the
+   button itself has focus, so the list stays calm but stays keyboard-reachable. */
+.run-row { position: relative; }
+.run-row .run-del {
+  position: absolute; top: 6px; right: 6px;
+  width: 24px; height: 24px; display: grid; place-items: center;
+  border-radius: var(--radius-sm); border: 1px solid transparent;
+  background: transparent; color: var(--color-text-disabled);
+  cursor: pointer; opacity: 0; transition: opacity var(--duration-fast);
+}
+.run-row:hover .run-del, .run-row .run-del:focus-visible { opacity: 1; }
+.run-row .run-del:hover {
+  color: var(--color-error); border-color: var(--color-error);
+  background: var(--color-error-surface);
+}
+
+/* Toasts gained a kind: a failure that looks identical to a success is worse
+   than no feedback, because it reads as confirmation. */
+.toast.is-error { border-color: var(--color-error); color: var(--color-error); }
+.toast.is-ok { border-color: var(--color-success); color: var(--color-success); }
+
+/* ---------------------------------------------------------------------------
+   Which model did the work.
+
+   A run can silently move between three providers, and until now the only
+   record was buried in the decision trail. When the answer is disappointing,
+   "which model actually produced this, and did it fall back?" is the first
+   question worth asking.
+   --------------------------------------------------------------------------- */
+.models { display: flex; flex-direction: column; gap: var(--space-3); }
+.model-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2) var(--space-4); align-items: baseline;
+  padding: var(--space-3) 0; border-bottom: 1px solid var(--color-border-subtle);
+}
+.model-row:last-of-type { border-bottom: 0; }
+.model-row .who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.model-row .id {
+  font-family: var(--font-mono); font-size: .82rem; font-weight: 500;
+  color: var(--color-text-primary); overflow-wrap: anywhere;
+}
+.model-row .role { font-size: .75rem; color: var(--color-text-secondary); }
+.model-row .counts {
+  display: flex; gap: var(--space-4); font-size: .78rem;
+  font-variant-numeric: tabular-nums; color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.model-row .counts b {
+  display: block; font-weight: 600; font-size: .9rem;
+  color: var(--color-text-primary);
+}
+.model-row .counts .unit { font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; }
+
+/* A model that was tried and rejected is as informative as the one that ran -
+   more so when the run went badly. Shown, not hidden. */
+.model-row.is-skipped .id { color: var(--color-text-secondary); text-decoration: line-through; }
+.model-fallback {
+  grid-column: 1 / -1; margin: 0;
+  font-size: .78rem; line-height: 1.5;
+  color: var(--color-error); background: var(--color-error-surface);
+  border: 1px solid var(--color-error); border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+}
+.model-total {
+  display: flex; justify-content: space-between; gap: var(--space-4);
+  padding-top: var(--space-3); border-top: 1px solid var(--color-border-subtle);
+  font-size: .8rem; font-variant-numeric: tabular-nums;
+}
+.model-total strong { font-weight: 600; }
+
+/* Model and token annotations inside the decision trail. */
+.audit-row .model-tag {
+  font-family: var(--font-mono); font-size: .7rem;
+  color: var(--color-primary-700); background: var(--color-primary-50);
+  border: 1px solid var(--color-primary-200); border-radius: var(--radius-sm);
+  padding: 0 4px; margin-right: 6px; white-space: nowrap;
+}
+.audit-row .tok {
+  font-family: var(--font-mono); font-size: .7rem;
+  color: var(--color-text-secondary); white-space: nowrap; margin-right: 6px;
+}
+.task .dep .model-tag { margin-right: 0; }
 </style>
 
 <div class="app">
@@ -586,6 +779,13 @@ details.audit[open] summary { border-bottom: 1px solid var(--color-border-subtle
 
     <button class="btn btn-ghost" id="palette-open" aria-haspopup="dialog">
       Search <span class="mono caption" style="opacity:.7">⌘K</span>
+    </button>
+
+    <button class="btn btn-ghost btn-icon" id="settings-open" aria-label="Settings" title="Settings" aria-haspopup="dialog">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.34.4.62.73.79H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
     </button>
 
     <button class="btn btn-ghost btn-icon" id="theme-toggle" aria-label="Switch theme" title="Switch theme">
@@ -627,6 +827,18 @@ details.audit[open] summary { border-bottom: 1px solid var(--color-border-subtle
   <div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
     <input id="palette-input" type="text" placeholder="Search runs, or type a command…" autocomplete="off" spellcheck="false">
     <div class="palette-results" id="palette-results" role="listbox" aria-label="Results"></div>
+  </div>
+</div>
+
+<div class="drawer-backdrop" id="settings-backdrop" hidden>
+  <div class="drawer" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <header>
+      <h2 id="settings-title">Settings</h2>
+      <button class="btn btn-ghost" id="settings-close">Close</button>
+    </header>
+    <div class="drawer-body" id="settings-body">
+      <p class="caption">Loading…</p>
+    </div>
   </div>
 </div>
 
@@ -673,7 +885,20 @@ async function api(path, options) {
     needsToken = true;
     throw new Error("unauthorized");
   }
-  if (!res.ok) throw new Error("http " + res.status);
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const body = await res.json();
+      detail = (body && body.error && (body.error.message || body.error.detail)) || "";
+      if (body && body.error && body.error.details && body.error.details.remedy) {
+        detail += " (" + body.error.details.remedy + ")";
+      }
+    } catch (_) { /* not JSON; the status is all there is */ }
+    const err = new Error(detail || "http " + res.status);
+    err.status = res.status;
+    throw err;
+  }
+  if (res.status === 204) return null;
   return res.json();
 }
 
@@ -839,10 +1064,12 @@ const ago = (iso) => {
   return Math.round(s / 86400) + "d ago";
 };
 
-function toast(message) {
-  const t = el("div", "toast", message);
+function toast(message, kind) {
+  // A failure styled like a success reads as confirmation, which is worse
+  // than silence. Errors also linger, because they are the ones worth reading.
+  const t = el("div", "toast" + (kind ? " is-" + kind : ""), message);
   $("#toasts").append(t);
-  setTimeout(() => t.remove(), 4200);
+  setTimeout(() => t.remove(), kind === "error" ? 8000 : 4200);
 }
 
 /* ---------- connection ---------- */
@@ -970,7 +1197,27 @@ function renderRuns() {
     btn.append(meta);
 
     btn.addEventListener("click", () => select(r.id));
-    list.append(btn);
+
+    // Wrapped so the delete control is a sibling of the row button rather
+    // than nested inside it: a button inside a button is invalid, and the
+    // click would select the run on its way to deleting it.
+    const row = el("div", "run-row");
+    row.append(btn);
+
+    const del = el("button", "run-del");
+    del.type = "button";
+    del.title = "Delete this run";
+    del.setAttribute("aria-label", "Delete run: " + r.objective);
+    del.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" ' +
+      'stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
+      '<path d="M18 6 6 18M6 6l12 12"/></svg>';
+    del.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteRun(r);
+    });
+    row.append(del);
+
+    list.append(row);
   });
 }
 
@@ -1032,7 +1279,10 @@ function adapt(record, events) {
     audit: events.map((e) => ({
       seq: e.sequence,
       type: e.type,
-      payload: summarisePayload(e.payload)
+      payload: summarisePayload(e.payload),
+      // Kept alongside the display string: the model name and token counts
+      // are structured data, and re-parsing them out of prose would be silly.
+      raw: e.payload || {}
     }))
   };
 }
@@ -1120,6 +1370,7 @@ function renderDetail(state) {
     host.append(advocateCard(run));
   }
   host.append(planCard(run));
+  host.append(modelsCard(run));
   host.append(checksCard(run));
   host.append(auditCard(run));
 }
@@ -1337,6 +1588,158 @@ function advocateCard(run) {
   return card;
 }
 
+/* ===========================================================================
+   Model accounting.
+
+   Derived from the decision trail rather than from the usage totals, because
+   the totals are a single sum: they cannot say that three providers were tried,
+   which one answered, or why the first two did not. That distinction is the
+   whole point when a run comes back weaker than expected.
+   =========================================================================== */
+function modelUsage(run) {
+  const order = [];
+  const byModel = new Map();
+  const fallbacks = [];
+
+  const seen = (name) => {
+    if (!byModel.has(name)) {
+      byModel.set(name, { model: name, provider: "", calls: 0, input: 0, output: 0, rejected: 0 });
+      order.push(name);
+    }
+    return byModel.get(name);
+  };
+
+  (run.audit || []).forEach((e) => {
+    const p = e.raw || {};
+    const name = p.model;
+    if (!name) return;
+
+    if (e.type === "model.selected") {
+      const row = seen(name);
+      if (p.provider) row.provider = p.provider;
+      if (p.reason && !row.reason) row.reason = p.reason;
+    } else if (e.type === "model.call") {
+      const row = seen(name);
+      row.calls += 1;
+      row.input += Number(p.input_tokens) || 0;
+      row.output += Number(p.output_tokens) || 0;
+      if (p.finish_reason) row.finish = p.finish_reason;
+    } else if (e.type === "model.fallback") {
+      const row = seen(name);
+      row.rejected += 1;
+      fallbacks.push({
+        model: name,
+        error: p.error || "",
+        message: p.message || "",
+        seq: e.seq
+      });
+    }
+  });
+
+  const rows = order.map((n) => byModel.get(n));
+  return {
+    rows: rows,
+    fallbacks: fallbacks,
+    input: rows.reduce((a, r) => a + r.input, 0),
+    output: rows.reduce((a, r) => a + r.output, 0),
+    calls: rows.reduce((a, r) => a + r.calls, 0)
+  };
+}
+
+function modelsCard(run) {
+  const stats = modelUsage(run);
+  const card = el("section", "card");
+  const head = el("header");
+  head.append(el("h3", null, "Models used"));
+  if (stats.rows.length) {
+    head.append(el("span", "caption",
+      stats.rows.length === 1 ? "1 model" : stats.rows.length + " models tried"));
+  }
+  card.append(head);
+
+  const body = el("div", "body");
+
+  if (!stats.rows.length) {
+    body.append(el("p", "caption",
+      "No model calls are recorded for this run."));
+    card.append(body);
+    return card;
+  }
+
+  const list = el("div", "models");
+  stats.rows.forEach((r) => {
+    // A model with no successful call was tried and passed over.
+    const skipped = r.calls === 0 && r.rejected > 0;
+    const row = el("div", "model-row" + (skipped ? " is-skipped" : ""));
+
+    const who = el("div", "who");
+    who.append(el("div", "id", r.model));
+    const bits = [];
+    if (r.provider) bits.push(r.provider);
+    if (r.reason) bits.push(r.reason);
+    if (skipped) bits.push("not used");
+    else if (r.finish === "length") bits.push("hit the output limit");
+    if (bits.length) who.append(el("div", "role", bits.join(" · ")));
+    row.append(who);
+
+    const counts = el("div", "counts");
+    const stat = (value, unit) => {
+      const box = el("div");
+      box.append(el("b", null, fmt(value)));
+      box.append(el("span", "unit", unit));
+      return box;
+    };
+    counts.append(stat(r.calls, r.calls === 1 ? "call" : "calls"));
+    if (r.input || r.output) {
+      counts.append(stat(r.input, "in"));
+      counts.append(stat(r.output, "out"));
+    }
+    row.append(counts);
+    list.append(row);
+  });
+  body.append(list);
+
+  // Why a model was passed over. Without this the row just says "not used",
+  // and a 404 from a mistyped model id looks the same as a rate limit.
+  stats.fallbacks.forEach((f) => {
+    const note = el("p", "model-fallback",
+      f.model + " was skipped — " + (f.message || f.error || "no reason recorded"));
+    body.append(note);
+  });
+
+  // The budget counter and the decision trail disagree, and the trail is the
+  // one telling the truth: calls made while working out the goal and building
+  // the plan happen before any task exists, and are not added to the run's
+  // usage. On this run that was nearly half the tokens spent. Surfaced rather
+  // than smoothed over - a budget that silently excludes a category of spend
+  // is worth knowing about before you set one.
+  const counted = (run.usage && run.usage.model_calls) || 0;
+  if (counted && stats.calls > counted) {
+    const gap = el("p", "model-fallback");
+    gap.style.color = "var(--color-warning)";
+    gap.style.background = "var(--color-warning-surface)";
+    gap.style.borderColor = "var(--color-warning)";
+    gap.textContent =
+      "The run's budget counted " + counted + " of these " + stats.calls +
+      " calls. Planning and goal analysis run before any task exists, so their " +
+      "tokens are not charged against limits.max_model_calls.";
+    body.append(gap);
+  }
+
+  const total = el("div", "model-total");
+  total.append(el("span", null,
+    stats.calls + (stats.calls === 1 ? " model call" : " model calls")));
+  const tokens = el("span");
+  tokens.append(el("strong", null, fmt(stats.input + stats.output)));
+  tokens.append(document.createTextNode(
+    " tokens  (" + fmt(stats.input) + " in / " + fmt(stats.output) + " out)"));
+  total.append(tokens);
+  body.append(total);
+
+  card.append(body);
+  return card;
+}
+
 function planCard(run) {
   const card = el("section", "card");
   const head = el("header");
@@ -1353,11 +1756,20 @@ function planCard(run) {
     const mid = el("div");
     mid.append(el("div", "name", t.name));
     if (t.detail) mid.append(el("div", "detail", t.detail));
-    const dep = [];
-    if (t.agent) dep.push(t.agent);
-    if (t.model && t.model !== "—") dep.push(t.model);
-    if (t.depends_on && t.depends_on.length) dep.push("after " + t.depends_on.join(", "));
-    if (dep.length) mid.append(el("div", "dep", dep.join("  ·  ")));
+    // The model that ran this step gets its own mark rather than being one
+    // more item in a run-on line: when a step disappoints, which model
+    // produced it is the first thing worth seeing.
+    const dep = el("div", "dep");
+    if (t.model && t.model !== "—") {
+      dep.append(el("span", "model-tag", t.model));
+      dep.append(document.createTextNode("  "));
+    }
+    const rest = [];
+    if (t.agent) rest.push(t.agent);
+    if (t.depends_on && t.depends_on.length) rest.push("after " + t.depends_on.join(", "));
+    if (t.attempts && t.attempts > 1) rest.push(t.attempts + " attempts");
+    if (rest.length) dep.append(document.createTextNode(rest.join("  ·  ")));
+    if (dep.childNodes.length) mid.append(dep);
     row.append(mid);
 
     row.append(el("span", "pill " + t.status, t.status));
@@ -1409,7 +1821,33 @@ function auditCard(run) {
     const row = el("div", "audit-row");
     row.append(el("span", "seq", String(e.seq)));
     row.append(el("span", "type", e.type));
-    row.append(el("span", "payload", e.payload));
+
+    // The model and the token counts get their own marks rather than being
+    // left inside the flattened payload text, so a long trail can be scanned
+    // for "which model, how many tokens" without reading every line.
+    const payload = el("span", "payload");
+    const p = e.raw || {};
+    const promoted = [];
+    if (p.model) {
+      payload.append(el("span", "model-tag", p.model));
+      promoted.push("model");
+    }
+    if (p.input_tokens != null || p.output_tokens != null) {
+      payload.append(el("span", "tok",
+        fmt(Number(p.input_tokens) || 0) + "\u2192" + fmt(Number(p.output_tokens) || 0) + " tok"));
+      promoted.push("input_tokens", "output_tokens");
+    }
+    // Whatever became a mark is dropped from the text. Showing the model name
+    // as a badge and then again as "model: ..." is noise, and it pushed the
+    // fields that were not promoted off the end of the 240-character summary.
+    if (promoted.length) {
+      const rest = {};
+      Object.keys(p).forEach((k) => { if (promoted.indexOf(k) === -1) rest[k] = p[k]; });
+      payload.append(document.createTextNode(summarisePayload(rest)));
+    } else {
+      payload.append(document.createTextNode(e.payload));
+    }
+    row.append(payload);
     list.append(row);
   });
   card.append(list);
@@ -1539,6 +1977,14 @@ function toggleTheme() {
 $("#run-btn").addEventListener("click", startRun);
 $("#new-run").addEventListener("click", () => { activeId = null; renderRuns(); renderDetail(); $("#objective").focus(); });
 $("#theme-toggle").addEventListener("click", toggleTheme);
+$("#settings-open").addEventListener("click", openSettings);
+$("#settings-close").addEventListener("click", closeSettings);
+$("#settings-backdrop").addEventListener("click", (event) => {
+  if (event.target === $("#settings-backdrop")) closeSettings();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("#settings-backdrop").hidden) closeSettings();
+});
 $("#palette-open").addEventListener("click", openPalette);
 $("#palette-input").addEventListener("input", (e) => fillPalette(e.target.value));
 
@@ -1558,6 +2004,259 @@ document.addEventListener("keydown", (e) => {
 $("#palette-backdrop").addEventListener("click", (e) => {
   if (e.target === $("#palette-backdrop")) closePalette();
 });
+
+/* ===========================================================================
+   Deleting a run.
+
+   Deletion takes the audit trail with it, so it asks first and says what goes.
+   It refuses while a run is live; the API enforces that too, and the message
+   it returns is what gets shown rather than a code.
+   =========================================================================== */
+async function deleteRun(run) {
+  const live = !["completed", "failed", "cancelled"].includes(run.status);
+  if (live) {
+    toast("This run is still " + run.status + ". Cancel it first, so nothing keeps running unrecorded.", "error");
+    return;
+  }
+  const label = run.objective.length > 60 ? run.objective.slice(0, 60) + "…" : run.objective;
+  if (!confirm("Delete this run permanently?\n\n" + label +
+               "\n\nIts result and its audit trail go with it. This cannot be undone.")) {
+    return;
+  }
+  try {
+    await api("/executions/" + encodeURIComponent(run.id), { method: "DELETE" });
+    runs = runs.filter((r) => r.id !== run.id);
+    if (activeId === run.id) {
+      activeId = null;
+      $("#detail").replaceChildren();
+    }
+    renderRuns();
+    toast("Deleted.", "ok");
+  } catch (err) {
+    toast("Could not delete: " + err.message, "error");
+  }
+}
+
+/* ===========================================================================
+   Settings.
+
+   Three questions, in the order people actually ask them: which environment is
+   this, can the models authenticate, and where does my work end up.
+   =========================================================================== */
+let settings = null;
+
+const ENVIRONMENTS = {
+  "development": {
+    label: "Development",
+    what: "Your machine, your data. Permissive and convenient. No token needed on loopback. Not for anyone else's data.",
+  },
+  "internal-pilot": {
+    label: "Internal pilot",
+    what: "A team inside one organisation, behind something that already authenticates. Tools must be granted explicitly.",
+  },
+  "production": {
+    label: "Production",
+    what: "Serving people who are not you. Deny by default, authentication required, egress restricted to hosts you list.",
+  },
+};
+
+async function openSettings() {
+  $("#settings-backdrop").hidden = false;
+  $("#settings-close").focus();
+  await loadSettings();
+}
+
+function closeSettings() {
+  $("#settings-backdrop").hidden = true;
+  $("#settings-open").focus();
+}
+
+async function loadSettings() {
+  const body = $("#settings-body");
+  body.replaceChildren(el("p", "caption", "Loading…"));
+  try {
+    settings = await api("/settings");
+  } catch (err) {
+    body.replaceChildren(el("p", "key-problem",
+      "Could not read settings: " + err.message));
+    return;
+  }
+  renderSettings();
+}
+
+function renderSettings() {
+  const body = $("#settings-body");
+  body.replaceChildren();
+  const editable = settings.profile.editable;
+
+  if (!editable) {
+    const lock = el("div", "set-locked");
+    lock.append(el("span", "", "🔒"));
+    lock.append(el("span", "", settings.profile.reason));
+    body.append(lock);
+  }
+
+  /* --- environment ------------------------------------------------------ */
+  const envGroup = el("section", "set-group");
+  envGroup.append(el("h3", "", "Environment"));
+  envGroup.append(el("p", "hint",
+    "What this deployment is for. It decides tool permissions, whether a token " +
+    "is required, and where traffic may go."));
+
+  const choice = el("div", "env-choice");
+  choice.setAttribute("role", "radiogroup");
+  choice.setAttribute("aria-label", "Environment");
+
+  settings.profile.available.forEach((name) => {
+    const meta = ENVIRONMENTS[name] || { label: name, what: "" };
+    const opt = el("button", "env-option");
+    opt.type = "button";
+    opt.setAttribute("role", "radio");
+    opt.setAttribute("aria-checked", String(name === settings.profile.current));
+    opt.disabled = !editable;
+    opt.append(el("span", "radio"));
+    const text = el("span");
+    text.append(el("span", "name", meta.label));
+    text.append(el("span", "what", meta.what));
+    opt.append(text);
+    opt.addEventListener("click", () => saveProfile(name));
+    choice.append(opt);
+  });
+  envGroup.append(choice);
+  body.append(envGroup);
+
+  /* --- providers -------------------------------------------------------- */
+  const provGroup = el("section", "set-group");
+  provGroup.append(el("h3", "", "Model providers"));
+  provGroup.append(el("p", "hint",
+    "Keys are stored in a file beside the database, never in config.yaml, and " +
+    "are never sent back to this page — you can see that one is set, not what it is."));
+
+  if (!settings.providers.length) {
+    provGroup.append(el("p", "caption", "No providers are configured."));
+  }
+
+  settings.providers.forEach((p) => {
+    const card = el("div", "provider");
+    const head = el("div", "provider-head");
+    const ident = el("div");
+    ident.append(el("div", "name", p.name));
+    if (p.base_url) ident.append(el("div", "url", p.base_url));
+    head.append(ident);
+
+    const key = p.key;
+    if (!p.needs_key) {
+      head.append(el("span", "pill", "no key needed"));
+    } else if (key && key.set) {
+      head.append(el("span", "pill completed", "set " + key.hint));
+    } else {
+      head.append(el("span", "pill failed", "not set"));
+    }
+    card.append(head);
+
+    if (key && key.problem) {
+      card.append(el("p", "key-problem", key.problem));
+    }
+
+    if (p.needs_key && key && key.env) {
+      const row = el("div", "key-row");
+      const input = el("input");
+      input.type = "password";
+      input.autocomplete = "off";
+      input.spellcheck = false;
+      input.placeholder = key.set ? "Paste a new key to replace it" : "Paste the key";
+      input.disabled = !editable;
+      row.append(input);
+
+      const save = el("button", "btn btn-primary", "Save");
+      save.type = "button";
+      save.disabled = !editable;
+      save.addEventListener("click", () => saveKey(key.env, input.value, input));
+      row.append(save);
+
+      if (key.set) {
+        const clear = el("button", "btn btn-ghost", "Clear");
+        clear.type = "button";
+        clear.disabled = !editable;
+        clear.addEventListener("click", () => {
+          if (confirm("Remove " + key.env + "? This provider will stop authenticating.")) {
+            saveKey(key.env, "", input);
+          }
+        });
+        row.append(clear);
+      }
+      card.append(row);
+      card.append(el("p", "key-note", "Stored as " + key.env + "."));
+    }
+    provGroup.append(card);
+  });
+  body.append(provGroup);
+
+  /* --- where things are saved ------------------------------------------- */
+  const store = el("section", "set-group");
+  store.append(el("h3", "", "Where things are saved"));
+  store.append(el("p", "hint",
+    "Nothing is written outside these locations."));
+
+  const paths = el("dl", "paths");
+  const addPath = (term, value) => {
+    const row = el("div", "path-row");
+    row.append(el("dt", "", term));
+    row.append(el("dd", "", value));
+    paths.append(row);
+  };
+  addPath("Runs & audit", settings.storage.path);
+  addPath("Backend", settings.storage.backend);
+  addPath("Provider keys", settings.storage.secrets_file);
+  addPath("Files created", settings.workspace.path);
+  store.append(paths);
+  store.append(el("p", "key-note", settings.workspace.note));
+  body.append(store);
+}
+
+async function saveKey(envName, value, input) {
+  try {
+    const result = await api("/settings/keys/" + encodeURIComponent(envName), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value: value }),
+    });
+    if (input) input.value = "";
+    toast(result.key.set ? envName + " saved." : envName + " removed.", "ok");
+    await loadSettings();
+    // The provider is rebuilt on the next run, so the health chip is stale
+    // until then; refresh it rather than leaving a red dot next to a key that
+    // now works.
+    probe().catch(() => {});
+  } catch (err) {
+    toast("Could not save: " + err.message, "error");
+  }
+}
+
+async function saveProfile(name) {
+  if (settings && name === settings.profile.current) return;
+  const meta = ENVIRONMENTS[name] || { label: name };
+  if (!confirm(
+    "Switch this deployment to " + meta.label + "?\n\n" +
+    (name === "development"
+      ? "This loosens the posture."
+      : "Once it is no longer in development, settings become read-only here — " +
+        "you would change them by editing the config file on this machine.") +
+    "\n\nIt takes effect when the server restarts.")) {
+    return;
+  }
+  try {
+    const result = await api("/settings/profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: name }),
+    });
+    toast("Saved to " + result.written + ". Restart to apply.", "ok");
+    await loadSettings();
+  } catch (err) {
+    toast("Could not change environment: " + err.message, "error");
+  }
+}
 
 (async function init() {
   try {

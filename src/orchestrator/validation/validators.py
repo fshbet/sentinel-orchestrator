@@ -15,10 +15,13 @@ import abc
 import asyncio
 import json
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable
+from pathlib import Path
+from typing import Any
 
 from ..core.domain.enums import Confidence, EvidenceType, KnowledgeStatus
+from ..core.domain.jsonio import coerce_json
 from ..core.domain.models import (
     Evidence,
     Execution,
@@ -27,7 +30,6 @@ from ..core.domain.models import (
     ValidationResult,
     ValidationSpec,
 )
-from ..core.domain.jsonio import coerce_json
 from ..errors import ConfigurationError, NotFound
 from ..tools.registry import ToolContext, ToolRegistry
 
@@ -251,7 +253,7 @@ def _structural_check(value: Any, schema: dict[str, Any], path: str) -> list[str
     """Dependency-free subset of JSON Schema: type, required, enum, properties."""
     errors: list[str] = []
     expected = schema.get("type")
-    types = {
+    types: dict[str, type | tuple[type, ...]] = {
         "object": dict,
         "array": list,
         "string": str,
@@ -318,7 +320,15 @@ class PatternValidator(Validator):
 
 
 class NonEmptyValidator(Validator):
-    """The weakest useful check: the task actually produced something."""
+    """The weakest useful check: the task actually produced something.
+
+    Passing establishes that output exists, and nothing whatsoever about
+    whether it is correct - so it reports LIKELY, not CONFIRMED. Reporting
+    CONFIRMED here meant a run whose only evidence was "the model said
+    something" was presented with the platform's highest certainty, which is
+    the exact claim this project exists not to make. A run that needs
+    CONFIRMED needs a check that can actually fail on wrong work.
+    """
 
     name = "non_empty"
 
@@ -332,6 +342,7 @@ class NonEmptyValidator(Validator):
             spec,
             context,
             passed=passed,
+            confidence=Confidence.LIKELY if passed else Confidence.FAILED,
             message=(
                 f"output is {len(text)} characters (minimum {minimum})"
                 if passed
@@ -344,45 +355,139 @@ class NonEmptyValidator(Validator):
                     summary=f"{len(text)} characters",
                 )
             ],
-            confidence=Confidence.CONFIRMED if passed else Confidence.FAILED,
         )
 
 
 class ArtifactExistsValidator(Validator):
-    """Check that a named artifact was produced, optionally with a location."""
+    """Check that a named artifact was produced *and* durably stored.
+
+    An in-memory record is not a deliverable. In the production deployment the
+    root filesystem is read-only and the fallback artifact path was unwritable,
+    so runs completed successfully while the file the user asked for existed
+    nowhere - the record said otherwise and this check believed it. It now
+    verifies the bytes.
+
+    Config:
+      ``name``            optional; which artifact to look for.
+      ``verify_content``  default true; check the stored file. Set false only
+                          where the store is not reachable from the validating
+                          process, and understand that this weakens the check
+                          back to a record lookup.
+    """
 
     name = "artifact_exists"
 
     async def validate(
         self, spec: ValidationSpec, context: ValidationContext
     ) -> ValidationResult:
+        import hashlib
+
         name = str(spec.config.get("name", ""))
+        verify = bool(spec.config.get("verify_content", True))
+
         artifacts = context.execution.artifacts
         if context.task is not None and context.task.result is not None:
             artifacts = artifacts + context.task.result.artifacts
-        match = next(
-            (a for a in artifacts if not name or a.name == name),
-            None,
-        )
-        passed = match is not None
+        match = next((a for a in artifacts if not name or a.name == name), None)
+
+        if match is None:
+            return self._result(
+                spec,
+                context,
+                passed=False,
+                message=f"no artifact named {name or '<any>'} was produced",
+                evidence=[
+                    Evidence(
+                        type=EvidenceType.FILE,
+                        source="artifact_registry",
+                        summary=f"missing artifact {name or '<any>'}",
+                    )
+                ],
+            )
+
+        # A reference-only artifact carries no content, so there is nothing on
+        # disk to check and its record is the whole of it.
+        has_content = match.content is not None and match.content != ""
+        if not verify or not has_content:
+            return self._result(
+                spec,
+                context,
+                passed=True,
+                message=f"artifact {match.name} was produced",
+                evidence=[
+                    Evidence(
+                        type=EvidenceType.FILE,
+                        source="artifact_registry",
+                        location=match.location or None,
+                        summary=match.name,
+                    )
+                ],
+            )
+
+        problem = self._durability_problem(match, context, hashlib)
         return self._result(
             spec,
             context,
-            passed=passed,
+            passed=problem is None,
             message=(
-                f"artifact {match.name} was produced"
-                if match is not None
-                else f"no artifact named {name or '<any>'} was produced"
+                f"artifact {match.name} was produced and stored ({match.size_bytes} bytes)"
+                if problem is None
+                else f"artifact {match.name} was recorded but {problem}"
             ),
             evidence=[
                 Evidence(
                     type=EvidenceType.FILE,
-                    source="artifact_registry",
-                    location=match.location if match else None,
-                    summary=match.name if match else f"missing artifact {name}",
+                    source="artifact_store",
+                    location=match.location or None,
+                    summary=(
+                        f"{match.name}: {match.size_bytes} bytes, "
+                        f"sha256 {(match.checksum or '')[:12]}"
+                        if problem is None
+                        else f"{match.name}: {problem}"
+                    ),
                 )
             ],
         )
+
+    @staticmethod
+    def _durability_problem(artifact, context, hashlib) -> str | None:
+        """Why this artifact is not durably stored, or None if it is.
+
+        Returns a sentence, never a path: this text reaches API responses and
+        the store's location is deployment layout.
+        """
+        if not artifact.location:
+            return "was never given a durable location"
+
+        stored = Path(artifact.location)
+
+        # The store boundary, when the deployment declared one. An artifact
+        # whose location sits outside it is not in the store, whatever the
+        # record claims.
+        root = context.extras.get("artifact_dir") if context.extras else None
+        if root:
+            try:
+                stored.resolve().relative_to(Path(root).resolve())
+            except (ValueError, OSError):
+                return "was stored outside the configured artifact store"
+
+        try:
+            if not stored.is_file():
+                return "the stored file is missing"
+            data = stored.read_bytes()
+        except OSError:
+            return "the stored file could not be read"
+
+        if artifact.size_bytes is not None and len(data) != artifact.size_bytes:
+            return (
+                f"the stored file is {len(data)} bytes, not the recorded "
+                f"{artifact.size_bytes}"
+            )
+        if artifact.checksum:
+            actual = hashlib.sha256(data).hexdigest()
+            if actual != artifact.checksum:
+                return "the stored file does not match its recorded checksum"
+        return None
 
 
 class ToolValidator(Validator):
@@ -409,7 +514,9 @@ class ToolValidator(Validator):
         if not tool_id:
             raise ConfigurationError("tool validator requires a tool id")
         result = await context.tools.call(
-            ToolCall(tool_id=str(tool_id), arguments=dict(spec.config.get("arguments", {}))),
+            ToolCall(
+                tool_id=str(tool_id), arguments=dict(spec.config.get("arguments", {}))
+            ),
             context.tool_context,
         )
         if not result.ok:
@@ -500,7 +607,9 @@ class ModelJudgeValidator(Validator):
 
     name = "model_judge"
 
-    def __init__(self, judge: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]) -> None:
+    def __init__(
+        self, judge: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+    ) -> None:
         self._judge = judge
 
     async def validate(

@@ -12,6 +12,7 @@ Every test here goes through `TestClient`, so it exercises the middleware.
 
 from __future__ import annotations
 
+import functools
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -34,12 +35,37 @@ def _auth(token):
     return {"Authorization": f"Bearer {token}"}
 
 
+# See test_api_authorization: create_app() without a config_path discovers the
+# developer's own .orchestrator/config.yaml and writes executions into their
+# real database. Tests get a throwaway store instead.
+_ISOLATED_CONFIG = """profile: development
+storage:
+  backend: memory
+models:
+  providers: []
+"""
+
+
+@functools.cache
+def _isolated_config_path():
+    import tempfile
+    from pathlib import Path as _Path
+
+    directory = tempfile.mkdtemp(prefix="orchestrator-token-api-")
+    path = _Path(directory) / "config.yaml"
+    path.write_text(_ISOLATED_CONFIG, encoding="utf-8")
+    return str(path)
+
+
 def _client(store, **kwargs):
     registry = IdentityRegistry(store=store, **kwargs)
-    return TestClient(create_app(
-        security=SecurityConfig(host="0.0.0.0", tokens=("unused",)),
-        identity_registry=registry,
-    )), registry
+    return TestClient(
+        create_app(
+            config_path=_isolated_config_path(),
+            security=SecurityConfig(host="0.0.0.0", tokens=("unused",)),
+            identity_registry=registry,
+        )
+    ), registry
 
 
 class _Recorder:
@@ -79,7 +105,8 @@ def test_an_expired_token_is_rejected_over_http():
 def test_a_not_yet_valid_token_is_rejected_over_http():
     store = TokenStore()
     secret, _ = store.issue(
-        "ops", scopes=[ADMIN],
+        "ops",
+        scopes=[ADMIN],
         not_before=datetime.now(UTC) + timedelta(hours=2),
     )
     client, _ = _client(store)
@@ -114,7 +141,7 @@ def test_revocation_takes_effect_without_restarting_the_service():
 
 
 def test_the_rejection_reason_distinguishes_expiry_from_an_unknown_token():
-    """"Expired" says reissue; "not recognised" sends you hunting for a typo."""
+    """ "Expired" says reissue; "not recognised" sends you hunting for a typo."""
     store = TokenStore()
     expired, _ = store.issue("a", scopes=[ADMIN], lifetime=-(CLOCK_SKEW * 10))
     client, _ = _client(store)
@@ -131,8 +158,9 @@ def test_scopes_are_enforced_on_the_request_path():
     client, _ = _client(store)
 
     assert client.get("/v1/executions", headers=_auth(reader)).status_code == 200
-    denied = client.post("/v1/executions", headers=_auth(reader),
-                         json={"objective": "x", "run": False})
+    denied = client.post(
+        "/v1/executions", headers=_auth(reader), json={"objective": "x", "run": False}
+    )
     assert denied.status_code == 403
 
 
@@ -142,16 +170,20 @@ def test_tenant_assignment_survives_the_request_path():
     globex, _ = store.issue("globex-bot", scopes=[ADMIN], tenant="globex")
     client, _ = _client(store, multi_tenant=True)
 
-    created = client.post("/v1/executions", headers=_auth(acme),
-                          json={"objective": "acme work", "run": False})
+    created = client.post(
+        "/v1/executions", headers=_auth(acme), json={"objective": "acme work", "run": False}
+    )
     assert created.status_code == 201
     execution_id = created.json()["id"]
 
-    assert client.get(f"/v1/executions/{execution_id}",
-                      headers=_auth(acme)).status_code == 200
+    assert (
+        client.get(f"/v1/executions/{execution_id}", headers=_auth(acme)).status_code == 200
+    )
     # 404, not 403: a 403 would confirm the id exists.
-    assert client.get(f"/v1/executions/{execution_id}",
-                      headers=_auth(globex)).status_code == 404
+    assert (
+        client.get(f"/v1/executions/{execution_id}", headers=_auth(globex)).status_code
+        == 404
+    )
 
 
 # --------------------------------------------------------------------------
@@ -162,8 +194,9 @@ def test_tenant_assignment_survives_the_request_path():
 def test_listing_tokens_returns_metadata_and_never_a_secret():
     store = TokenStore()
     admin_secret, _ = store.issue("admin", scopes=[ADMIN], description="ops")
-    other_secret, _ = store.issue("ci", scopes=[EXECUTIONS_READ],
-                                  lifetime=timedelta(days=30))
+    other_secret, _ = store.issue(
+        "ci", scopes=[EXECUTIONS_READ], lifetime=timedelta(days=30)
+    )
     client, _ = _client(store)
 
     response = client.get("/v1/tokens", headers=_auth(admin_secret))
@@ -196,8 +229,11 @@ def test_revoking_through_the_api_takes_effect_immediately():
 
     assert client.get("/v1/executions", headers=_auth(victim_secret)).status_code == 200
 
-    revoked = client.post(f"/v1/tokens/{victim.token_id}/revoke",
-                          headers=_auth(admin_secret), params={"reason": "leaked"})
+    revoked = client.post(
+        f"/v1/tokens/{victim.token_id}/revoke",
+        headers=_auth(admin_secret),
+        params={"reason": "leaked"},
+    )
     assert revoked.status_code == 200
     assert revoked.json()["revoked"] is True
 
@@ -209,16 +245,24 @@ def test_revoking_requires_admin():
     store = TokenStore()
     reader, record = store.issue("reader", scopes=[EXECUTIONS_READ])
     client, _ = _client(store)
-    assert client.post(f"/v1/tokens/{record.token_id}/revoke",
-                       headers=_auth(reader)).status_code == 403
+    assert (
+        client.post(
+            f"/v1/tokens/{record.token_id}/revoke", headers=_auth(reader)
+        ).status_code
+        == 403
+    )
 
 
 def test_revoking_an_unknown_token_is_a_404():
     store = TokenStore()
     admin_secret, _ = store.issue("admin", scopes=[ADMIN])
     client, _ = _client(store)
-    assert client.post("/v1/tokens/tok_nonexistent/revoke",
-                       headers=_auth(admin_secret)).status_code == 404
+    assert (
+        client.post(
+            "/v1/tokens/tok_nonexistent/revoke", headers=_auth(admin_secret)
+        ).status_code
+        == 404
+    )
 
 
 def test_an_admin_cannot_revoke_their_way_into_a_secret():
@@ -232,8 +276,7 @@ def test_an_admin_cannot_revoke_their_way_into_a_secret():
     # Strip comments and docstrings: the prose here discusses secrets, which
     # is not the same as returning one.
     code = " ".join(
-        line for line in tokens_section.splitlines()
-        if not line.strip().startswith("#")
+        line for line in tokens_section.splitlines() if not line.strip().startswith("#")
     )
     for forbidden in ("generate_token", ".issue(", '"secret"', "token_value"):
         assert forbidden not in code, (
@@ -249,8 +292,11 @@ def test_revocation_is_audited_with_the_actor():
     _victim_secret, victim = store.issue("ci", scopes=[EXECUTIONS_READ])
     client, _ = _client(store)
 
-    client.post(f"/v1/tokens/{victim.token_id}/revoke",
-                headers=_auth(admin_secret), params={"reason": "rotated"})
+    client.post(
+        f"/v1/tokens/{victim.token_id}/revoke",
+        headers=_auth(admin_secret),
+        params={"reason": "rotated"},
+    )
     assert "token.revoked" in audit.types()
     payloads = [p for e, p in audit.events if e == "token.revoked"]
     assert any(p.get("token_id") == victim.token_id for p in payloads)
@@ -265,10 +311,14 @@ def test_the_registry_holds_no_plaintext_after_construction():
     """A memory dump must not yield working credentials."""
     from orchestrator.api.identity import Principal, TokenPrincipal, expand_scopes
 
-    registry = IdentityRegistry([
-        TokenPrincipal("a-very-distinctive-secret-value",
-                       Principal(id="p", scopes=expand_scopes([ADMIN])))
-    ])
+    registry = IdentityRegistry(
+        [
+            TokenPrincipal(
+                "a-very-distinctive-secret-value",
+                Principal(id="p", scopes=expand_scopes([ADMIN])),
+            )
+        ]
+    )
     assert "a-very-distinctive-secret-value" not in str(registry.__dict__)
     assert "a-very-distinctive-secret-value" not in str(registry.list_tokens())
     # And it still resolves.
@@ -279,9 +329,9 @@ def test_the_registry_resolves_through_the_token_store():
     """One path: if these diverged, the middleware would use the weaker one."""
     from orchestrator.api.identity import Principal, TokenPrincipal, expand_scopes
 
-    registry = IdentityRegistry([
-        TokenPrincipal("s", Principal(id="p", scopes=expand_scopes([ADMIN])))
-    ])
+    registry = IdentityRegistry(
+        [TokenPrincipal("s", Principal(id="p", scopes=expand_scopes([ADMIN])))]
+    )
     assert isinstance(registry.tokens, TokenStore)
 
     token_id = registry.list_tokens()[0]["token_id"]
@@ -305,9 +355,9 @@ def test_configured_principals_satisfy_the_insecure_binding_check(monkeypatch):
     monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
     monkeypatch.setenv("OPS_TOKEN", "a-configured-token")
 
-    registry = IdentityRegistry.from_config({
-        "principals": [{"id": "ops", "token_env": "OPS_TOKEN", "scopes": ["admin"]}]
-    })
+    registry = IdentityRegistry.from_config(
+        {"principals": [{"id": "ops", "token_env": "OPS_TOKEN", "scopes": ["admin"]}]}
+    )
     assert registry.enabled is True
 
     config = SecurityConfig(host="0.0.0.0")
@@ -330,12 +380,14 @@ def test_a_principal_yields_exactly_one_token(monkeypatch):
     monkeypatch.setenv("OPS_TOKEN", "ops-value")
     monkeypatch.setenv("CI_TOKEN", "ci-value")
 
-    registry = IdentityRegistry.from_config({
-        "principals": [
-            {"id": "ops", "token_env": "OPS_TOKEN", "scopes": ["admin"]},
-            {"id": "ci", "token_env": "CI_TOKEN", "scopes": ["executions.read"]},
-        ]
-    })
+    registry = IdentityRegistry.from_config(
+        {
+            "principals": [
+                {"id": "ops", "token_env": "OPS_TOKEN", "scopes": ["admin"]},
+                {"id": "ci", "token_env": "CI_TOKEN", "scopes": ["executions.read"]},
+            ]
+        }
+    )
 
     tokens = registry.list_tokens()
     assert len(tokens) == 2, [t["principal"] for t in tokens]
@@ -348,9 +400,9 @@ def test_revoking_a_principal_leaves_no_second_credential(monkeypatch):
     monkeypatch.delenv("ORCHESTRATOR_API_TOKEN", raising=False)
     monkeypatch.setenv("CI_TOKEN", "ci-value")
 
-    registry = IdentityRegistry.from_config({
-        "principals": [{"id": "ci", "token_env": "CI_TOKEN", "scopes": ["admin"]}]
-    })
+    registry = IdentityRegistry.from_config(
+        {"principals": [{"id": "ci", "token_env": "CI_TOKEN", "scopes": ["admin"]}]}
+    )
     entries = [t for t in registry.list_tokens() if t["principal"] == "ci"]
     assert len(entries) == 1
 
@@ -374,8 +426,7 @@ def test_enabling_proxy_identity_is_refused_by_configuration(tmp_path):
 
     path = tmp_path / "config.yaml"
     path.write_text(
-        "version: 1\nprofile: development\n"
-        "api:\n  proxy_identity:\n    enabled: true\n",
+        "version: 1\nprofile: development\napi:\n  proxy_identity:\n    enabled: true\n",
         encoding="utf-8",
     )
     with pytest.raises(ConfigurationError) as exc:
@@ -390,8 +441,7 @@ def test_proxy_identity_disabled_is_accepted(tmp_path):
 
     path = tmp_path / "config.yaml"
     path.write_text(
-        "version: 1\nprofile: development\n"
-        "api:\n  proxy_identity:\n    enabled: false\n",
+        "version: 1\nprofile: development\napi:\n  proxy_identity:\n    enabled: false\n",
         encoding="utf-8",
     )
     assert load(paths=[str(path)], include_discovered=False) is not None

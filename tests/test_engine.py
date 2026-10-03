@@ -15,8 +15,8 @@ from pathlib import Path
 from conftest import (
     build_platform,
     failing_worker_model,
-    planning_model,
     make_config,
+    planning_model,
     run,
 )
 
@@ -48,7 +48,11 @@ def test_a_simple_objective_completes_with_evidence():
 
     execution = run(scenario())
     assert execution.status is ExecutionStatus.COMPLETED
-    assert execution.confidence is Confidence.CONFIRMED
+    # LIKELY, not CONFIRMED. The only check here is `non_empty`, which
+    # establishes that output exists and nothing about whether it is right.
+    # Reporting the platform's highest certainty on that evidence is the claim
+    # this project is built to avoid making.
+    assert execution.confidence is Confidence.LIKELY
     assert all(t.status is TaskStatus.SUCCEEDED for t in execution.tasks.values())
     assert execution.validations
     assert all(v.evidence for v in execution.validations)
@@ -75,9 +79,7 @@ def test_with_no_model_configured_the_run_escalates_instead_of_pretending():
 
 def test_with_no_model_and_no_escalation_the_run_fails_honestly():
     async def scenario():
-        platform = await build_platform(
-            None, recovery={"allow_human_escalation": False}
-        )
+        platform = await build_platform(None, recovery={"allow_human_escalation": False})
         execution = await platform.run("Do the thing.")
         await platform.close()
         return execution
@@ -89,6 +91,7 @@ def test_with_no_model_and_no_escalation_the_run_fails_honestly():
 
 
 # -- planning and graph shape ---------------------------------------------
+
 
 def test_dependencies_are_respected_in_order():
     order: list[str] = []
@@ -104,8 +107,18 @@ def test_dependencies_are_respected_in_order():
     provider = planning_model(
         tasks=_tasks(
             {"key": "a", "name": "a", "objective": "Do the first part."},
-            {"key": "b", "name": "b", "objective": "Do the second part.", "depends_on": ["a"]},
-            {"key": "c", "name": "c", "objective": "Do the third part.", "depends_on": ["b"]},
+            {
+                "key": "b",
+                "name": "b",
+                "objective": "Do the second part.",
+                "depends_on": ["a"],
+            },
+            {
+                "key": "c",
+                "name": "c",
+                "objective": "Do the third part.",
+                "depends_on": ["b"],
+            },
         ),
         worker=worker,
     )
@@ -382,7 +395,11 @@ def test_a_claim_of_success_cannot_pass_a_failing_gate():
 
 def test_model_failure_falls_back_to_another_model():
     broken = ScriptedProvider(
-        [__import__("orchestrator.errors", fromlist=["ModelUnavailable"]).ModelUnavailable("down")],
+        [
+            __import__(
+                "orchestrator.errors", fromlist=["ModelUnavailable"]
+            ).ModelUnavailable("down")
+        ],
         name="broken",
         model_id="broken/model",
         repeat_last=True,
@@ -489,9 +506,7 @@ def test_a_rejected_approval_skips_the_task():
 
 def test_a_waiting_execution_stays_waiting_until_answered():
     provider = planning_model(
-        tasks=_tasks(
-            {"key": "a", "name": "risky", "objective": "Risky.", "risk": "high"}
-        )
+        tasks=_tasks({"key": "a", "name": "risky", "objective": "Risky.", "risk": "high"})
     )
 
     async def scenario():
@@ -591,8 +606,8 @@ def test_state_survives_a_restart_and_resumes_rather_than_restarting():
 
 def test_interrupted_in_flight_tasks_are_rewound_not_duplicated():
     from orchestrator.adapters.workflow.base import LocalWorkflowBackend
-    from orchestrator.core.state.memory_store import InMemoryStateStore
     from orchestrator.core.state.manager import StateManager
+    from orchestrator.core.state.memory_store import InMemoryStateStore
     from orchestrator.observability.audit import AuditLog
 
     async def scenario():
@@ -693,9 +708,7 @@ def test_the_audit_trail_is_complete_and_ordered():
 def test_concurrent_executions_do_not_interfere():
     async def scenario():
         platform = await build_platform(planning_model())
-        results = await asyncio.gather(
-            *(platform.run(f"Objective {i}.") for i in range(4))
-        )
+        results = await asyncio.gather(*(platform.run(f"Objective {i}.") for i in range(4)))
         listed = await platform.list()
         await platform.close()
         return results, listed

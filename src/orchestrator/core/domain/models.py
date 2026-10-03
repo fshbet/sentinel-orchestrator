@@ -10,7 +10,7 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from .enums import (
     ApprovalStatus,
@@ -45,7 +45,9 @@ class DomainModel:
         return from_dict(cls, data)
 
     def replace(self, **changes: Any):
-        return dataclasses.replace(self, **changes)
+        # The cast states what every subclass guarantees and the mixin
+        # cannot: that `self` is a dataclass instance.
+        return dataclasses.replace(cast("Any", self), **changes)
 
 
 # --------------------------------------------------------------------------
@@ -247,6 +249,10 @@ class Artifact(DomainModel):
     content: Any = None
     media_type: str | None = None
     size_bytes: int | None = None
+    # SHA-256 of the bytes actually written, so a validator can prove the file
+    # on disk is the artifact this record describes rather than trusting that
+    # a path exists.
+    checksum: str | None = None
     produced_by: str | None = None
     created_at: datetime = field(default_factory=utcnow)
     metadata: dict[str, Any] = field(default_factory=dict)

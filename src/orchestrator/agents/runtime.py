@@ -51,8 +51,14 @@ How to work:
   say so plainly in your answer rather than pretending or working around it.
 - Base conclusions on what tools and inputs actually returned. If you could not
   establish something, say which part is unverified.
-- When you are finished, reply with your result as plain prose. Do not claim a
-  check passed unless a tool actually reported that.
+- If the task is to produce something - a file, a document, code, a dataset -
+  publish it with orchestrator.emit_artifact, once, with its full content and a
+  sensible filename. Do not paste a file's contents into your reply and tell
+  the reader to save it themselves: that leaves nothing behind, and the run
+  will be judged on what was actually produced.
+- When you are finished, reply with plain prose explaining what you did and
+  what you published. Do not claim a check passed unless a tool actually
+  reported that.
 
 Your work will be independently validated. Claiming completion does not make a
 task complete."""
@@ -67,6 +73,10 @@ class AgentRunContext:
     agent: AgentSpec
     scope: PermissionScope
     workspace: str | None = None
+    # Where published artifacts are written as files. Separate from the
+    # workspace on purpose: publishing a result is not the same permission as
+    # writing anywhere in the project, and it should not require that one.
+    artifact_dir: str | None = None
     instructions: str = ""
     extra_context: dict[str, Any] = field(default_factory=dict)
 
@@ -102,18 +112,25 @@ class BaseRuntime(abc.ABC):
         message: str,
         *,
         usage: Usage | None = None,
+        artifacts: list[Artifact] | None = None,
         **details: Any,
     ) -> TaskResult:
         """A failed attempt still spent budget, and that has to stay visible.
 
         Dropping the accrued usage here would make a failing agent look free,
         which is exactly the run you most want to see the cost of.
+
+        The same applies to anything it published before it ran out of road.
+        An agent that emitted a working file and then hit its iteration limit
+        has still produced that file, and throwing it away on the way out
+        loses the one part of the attempt that was worth keeping.
         """
         return TaskResult(
             task_id=task.id,
             ok=False,
             summary=message,
             confidence=Confidence.FAILED,
+            artifacts=list(artifacts or []),
             usage=usage or Usage(),
             error={"message": message, **details},
         )
@@ -136,7 +153,7 @@ class GenericAgentRuntime(BaseRuntime):
         tools: ToolRegistry,
         context_manager: ContextManager,
         audit: AuditLog | None = None,
-        skills: "SkillRegistry | None" = None,
+        skills: SkillRegistry | None = None,
     ) -> None:
         self.router = router
         self.tools = tools
@@ -179,6 +196,14 @@ class GenericAgentRuntime(BaseRuntime):
             agent_id=agent.id,
             scope=run_context.scope,
             workspace=run_context.workspace,
+            # The list `artifacts` above is the sink. Handing it to the tool
+            # layer is what connects `emit_artifact` to this task's result:
+            # without it the tool built an Artifact, dropped it, and reported
+            # an id for something that was never stored.
+            metadata={
+                "artifact_sink": artifacts,
+                "artifact_dir": run_context.artifact_dir,
+            },
         )
         skill_guidance = self._skill_guidance(run_context)
         visible_tools = self.tools.for_scope(run_context.scope)
@@ -220,6 +245,7 @@ class GenericAgentRuntime(BaseRuntime):
                     task,
                     f"agent exceeded its {constraints.timeout_seconds}s time budget",
                     usage=usage,
+                    artifacts=artifacts,
                     iterations=iteration - 1,
                 )
             if usage.model_calls >= constraints.max_model_calls:
@@ -294,7 +320,9 @@ class GenericAgentRuntime(BaseRuntime):
                     task_id=task.id,
                     ok=bool(summary),
                     summary=summary[:2000],
-                    output=response.structured if response.structured is not None else summary,
+                    output=response.structured
+                    if response.structured is not None
+                    else summary,
                     confidence=Confidence.LIKELY if summary else Confidence.UNCERTAIN,
                     artifacts=artifacts,
                     evidence=evidence,
@@ -348,6 +376,7 @@ class GenericAgentRuntime(BaseRuntime):
             f"agent reached its iteration limit of {constraints.max_iterations} "
             "without producing a final answer",
             usage=usage,
+            artifacts=artifacts,
             iterations=constraints.max_iterations,
         )
 

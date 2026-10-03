@@ -390,6 +390,139 @@ published=$(docker port orchestrator-1 2>/dev/null | wc -l | tr -d '[:space:]')
 check "orchestrator publishes no host ports" "$published" "0"
 
 echo
+echo "=== 14. artifact persistence across replicas ==="
+#
+# The defect this proves fixed: production set no storage.artifact_dir, the
+# path fell back to one derived from the unused SQLite default, that path was
+# inside a read-only root filesystem, the write failed, the failure was
+# swallowed, and the run reported a produced artifact that existed nowhere.
+
+ART_DIR=$(docker exec orchestrator-1 python -c "
+import sys; sys.path.insert(0, '/app/src')
+from orchestrator.config.loader import load
+print(load(paths=['/etc/orchestrator/config.yaml']).get('storage.artifact_dir') or '')
+" 2>/dev/null | tr -d '\r')
+
+check "production config declares an artifact store" \
+  "$([ -n "$ART_DIR" ] && echo yes || echo no)" "yes"
+
+# It must not be the fallback, and must not sit in the app dir or workspace.
+case "$ART_DIR" in
+  */.orchestrator/*) bad=yes ;;
+  /app/*)            bad=yes ;;
+  *)                 bad=no  ;;
+esac
+check "artifact store is not the sqlite-derived fallback" "$bad" "no"
+
+# Writable by the unprivileged user, on both replicas, at the same path.
+for c in orchestrator-1 orchestrator-2; do
+  w=$(docker exec "$c" sh -c "touch '$ART_DIR/.probe-$c' 2>/dev/null && echo yes || echo no")
+  check "$c can write to the artifact store" "$w" "yes"
+done
+# Written by replica 1, visible to replica 2: one volume, not two.
+seen=$(docker exec orchestrator-2 sh -c "[ -f '$ART_DIR/.probe-orchestrator-1' ] && echo yes || echo no")
+check "replicas share one artifact store" "$seen" "yes"
+docker exec orchestrator-1 sh -c "rm -f '$ART_DIR'/.probe-*" >/dev/null 2>&1 || true
+
+# Publish through replica 1, using the tool the agent uses.
+PUBLISH='
+import sys; sys.path.insert(0, "/app/src")
+from orchestrator.tools import native
+from orchestrator.tools.registry import ToolContext
+entries = native.bookkeeping_tools()
+emit = next(h for spec, h in entries if spec.id == "orchestrator.emit_artifact")
+sink = []
+out = emit(
+    {"name": "smoke-artifact.html", "content": "<h1>published by replica 1</h1>"},
+    ToolContext(execution_id="exe_smoke", task_id="t",
+                metadata={"artifact_sink": sink, "artifact_dir": "%s"}),
+)
+print(sink[0].checksum, sink[0].size_bytes, out.get("written_to", ""))
+'
+published=$(docker exec orchestrator-1 python -c "$(printf "$PUBLISH" "$ART_DIR")" 2>&1 | tr -d '\r')
+CHECKSUM=$(echo "$published" | awk '{print $1}')
+SIZE=$(echo "$published" | awk '{print $2}')
+
+check "replica 1 published an artifact with a checksum" \
+  "$([ ${#CHECKSUM} -eq 64 ] && echo yes || echo no)" "yes"
+
+# Physically present, on replica 1.
+present=$(docker exec orchestrator-1 sh -c \
+  "[ -f '$ART_DIR/exe_smoke/smoke-artifact.html' ] && echo yes || echo no")
+check "artifact is physically present on replica 1" "$present" "yes"
+
+# And readable, byte-identical, from the *other* replica.
+remote_sum=$(docker exec orchestrator-2 python -c "
+import hashlib
+print(hashlib.sha256(open('$ART_DIR/exe_smoke/smoke-artifact.html','rb').read()).hexdigest())
+" 2>/dev/null | tr -d '\r')
+check "replica 2 reads the same bytes replica 1 wrote" "$remote_sum" "$CHECKSUM"
+
+remote_size=$(docker exec orchestrator-2 sh -c \
+  "wc -c < '$ART_DIR/exe_smoke/smoke-artifact.html'" 2>/dev/null | tr -d '[:space:]\r')
+check "stored size matches the recorded size" "$remote_size" "$SIZE"
+
+# Validation must confirm the file, not the record.
+validated=$(docker exec orchestrator-2 python -c "
+import sys, asyncio; sys.path.insert(0, '/app/src')
+from orchestrator.core.domain.models import Artifact, Execution, Task, TaskResult, ValidationSpec
+from orchestrator.validation.validators import ArtifactExistsValidator, ValidationContext
+a = Artifact(name='smoke-artifact.html', content='<h1>published by replica 1</h1>',
+             location='$ART_DIR/exe_smoke/smoke-artifact.html',
+             size_bytes=$SIZE, checksum='$CHECKSUM')
+e = Execution(objective='smoke'); t = Task(id='t', name='t')
+t.result = TaskResult(task_id='t', ok=True, artifacts=[a]); e.tasks['t'] = t
+ctx = ValidationContext(execution=e, task=t, extras={'artifact_dir': '$ART_DIR'})
+r = asyncio.run(ArtifactExistsValidator().validate(ValidationSpec(validator='artifact_exists'), ctx))
+print('pass' if r.passed else 'fail')
+" 2>/dev/null | tr -d '\r')
+check "replica 2 validates the artifact it did not write" "$validated" "pass"
+
+# Tamper with the stored bytes: validation must now refuse.
+docker exec orchestrator-2 sh -c \
+  "printf tampered > '$ART_DIR/exe_smoke/smoke-artifact.html'" >/dev/null 2>&1
+tampered=$(docker exec orchestrator-2 python -c "
+import sys, asyncio; sys.path.insert(0, '/app/src')
+from orchestrator.core.domain.models import Artifact, Execution, Task, TaskResult, ValidationSpec
+from orchestrator.validation.validators import ArtifactExistsValidator, ValidationContext
+a = Artifact(name='smoke-artifact.html', content='<h1>published by replica 1</h1>',
+             location='$ART_DIR/exe_smoke/smoke-artifact.html',
+             size_bytes=$SIZE, checksum='$CHECKSUM')
+e = Execution(objective='smoke'); t = Task(id='t', name='t')
+t.result = TaskResult(task_id='t', ok=True, artifacts=[a]); e.tasks['t'] = t
+ctx = ValidationContext(execution=e, task=t, extras={'artifact_dir': '$ART_DIR'})
+r = asyncio.run(ArtifactExistsValidator().validate(ValidationSpec(validator='artifact_exists'), ctx))
+print('pass' if r.passed else 'fail')
+" 2>/dev/null | tr -d '\r')
+check "altered bytes fail validation" "$tampered" "fail"
+
+# A store that cannot be written must fail the publication, not report success.
+forced=$(docker exec orchestrator-1 python -c "
+import sys; sys.path.insert(0, '/app/src')
+from orchestrator.tools import native
+from orchestrator.tools.registry import ToolContext
+from orchestrator.errors import ToolError
+entries = native.bookkeeping_tools()
+emit = next(h for spec, h in entries if spec.id == 'orchestrator.emit_artifact')
+sink = []
+try:
+    emit({'name': 'nope.html', 'content': 'x' * 32},
+         ToolContext(execution_id='exe_ro', task_id='t',
+                     metadata={'artifact_sink': sink, 'artifact_dir': '/proc/forbidden'}))
+    print('reported-success')
+except ToolError:
+    print('failed-closed' if not sink else 'failed-but-recorded')
+" 2>/dev/null | tr -d '\r')
+check "an unwritable store fails the publication" "$forced" "failed-closed"
+
+# And nothing may land in the application directory or a sqlite-style fallback.
+for c in orchestrator-1 orchestrator-2; do
+  stray=$(docker exec "$c" sh -c \
+    'find /app /workspace /.orchestrator -name "*.html" 2>/dev/null | head -1' || true)
+  check "$c wrote no artifact outside the store" "${stray:-none}" "none"
+done
+
+echo
 if [ "$FAILURES" -eq 0 ]; then
   echo "smoke test PASSED"
 else

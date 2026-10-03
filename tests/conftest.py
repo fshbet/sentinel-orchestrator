@@ -8,9 +8,11 @@ test double because a model is not deterministic, and that is the only seam.
 from __future__ import annotations
 
 import asyncio
+import functools
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import pytest
 
@@ -57,14 +59,18 @@ def planning_model(
     Which phase a request belongs to is detected from the system prompt, which
     is exactly how a real provider would see it.
     """
-    default_tasks = tasks if tasks is not None else [
-        {
-            "key": "only",
-            "name": "do the work",
-            "objective": "Accomplish the objective.",
-            "validation": {"validator": "non_empty"},
-        }
-    ]
+    default_tasks = (
+        tasks
+        if tasks is not None
+        else [
+            {
+                "key": "only",
+                "name": "do the work",
+                "objective": "Accomplish the objective.",
+                "validation": {"validator": "non_empty"},
+            }
+        ]
+    )
     default_requirements = requirements or {
         "explicit": ["Accomplish the objective"],
         "success_criteria": [
@@ -108,9 +114,26 @@ def failing_worker_model(failures: int = 99, *, message: str = "") -> CallablePr
 # --------------------------------------------------------------------------
 
 
+@functools.cache
+def _test_artifact_dir() -> str:
+    """A throwaway directory for artifacts published during tests.
+
+    Without this, published artifacts derive their location from storage.path
+    and land in the developer's real .orchestrator/artifacts/ - the same way
+    test executions used to end up in their real database. Tests write to their
+    own scratch space or they are not tests.
+    """
+    import tempfile
+
+    return tempfile.mkdtemp(prefix="orchestrator-test-artifacts-")
+
+
 def make_config(**overrides: Any) -> Config:
     base: dict[str, Any] = {
-        "storage": {"backend": "memory"},
+        "storage": {
+            "backend": "memory",
+            "artifact_dir": _test_artifact_dir(),
+        },
         "logging": {"level": "critical"},
         "plugins": {"enabled": False},
         "workflows": {"directories": []},

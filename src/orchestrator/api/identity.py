@@ -263,14 +263,10 @@ class IdentityRegistry:
 
         for index, raw in enumerate(api.get("principals") or []):
             if not isinstance(raw, dict):
-                raise ConfigurationError(
-                    f"api.principals[{index}] must be a mapping"
-                )
+                raise ConfigurationError(f"api.principals[{index}] must be a mapping")
             principal_id = str(raw.get("id") or "").strip()
             if not principal_id:
-                raise ConfigurationError(
-                    f"api.principals[{index}] needs an id"
-                )
+                raise ConfigurationError(f"api.principals[{index}] needs an id")
 
             variable = str(raw.get("token_env") or "").strip()
             if not variable:
@@ -288,8 +284,7 @@ class IdentityRegistry:
 
             scopes = raw.get("scopes")
             resolved_scopes: tuple[str, ...] = (
-                DEFAULT_SCOPES if scopes is None
-                else tuple(str(s).strip() for s in scopes)
+                DEFAULT_SCOPES if scopes is None else tuple(str(s).strip() for s in scopes)
             )
             unknown = sorted(set(resolved_scopes) - set(ALL_SCOPES))
             if unknown:
@@ -376,6 +371,14 @@ _ROUTE_SCOPES: tuple[tuple[str, str, str], ...] = (
     # Token metadata and revocation are administrative by nature.
     ("GET", "/v1/tokens", ADMIN),
     ("POST", "/v1/tokens", ADMIN),
+    # Deleting a run destroys its audit trail, which is a security control
+    # rather than a user convenience. More destructive than cancelling, so it
+    # is not covered by executions.write even though ownership is also checked.
+    ("DELETE", "/v1/executions", ADMIN),
+    # Settings name absolute paths, the storage backend, and every configured
+    # provider — the same deployment map that made /health admin-only.
+    ("GET", "/v1/settings", ADMIN),
+    ("PUT", "/v1/settings", ADMIN),
 )
 
 
