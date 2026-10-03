@@ -416,10 +416,84 @@ def test_example_mcp_policies_refer_to_configured_servers():
     servers = block["servers"] or {}
     assert servers, "the example should show at least one connected server"
 
-    for policy in block["policies"] or []:
-        assert policy["server"] in servers, policy["server"]
+    policies = {policy["server"] for policy in block["policies"] or []}
+
+    for server in policies:
+        assert server in servers, server
 
     for server_id, spec in servers.items():
         # Transport is inferred from which key is present; neither means the
         # server cannot be started at all.
         assert spec.get("command") or spec.get("url"), server_id
+        # And the other direction, which the first version of this test did
+        # not check: a server with no policy block runs on MCPServerPolicy's
+        # permissive defaults. That is allowed at runtime, deliberately, but
+        # the shipped example is what people copy, so it states its ceilings.
+        assert server_id in policies, (
+            f"the example configures {server_id} with no policy block; "
+            "it would run on the default ceiling"
+        )
+
+
+def test_a_server_with_no_policy_block_gets_the_documented_default():
+    """The default is permissive, and that is deliberate - a laptop should not
+    need a policy block per server to get started. What was wrong was that it
+    was *silently* permissive, so this pins exactly what applies and the
+    record remembers that nobody chose it.
+
+    The ceiling still applies here, and under internal-pilot or production the
+    profile's deny-by-default effect refuses these tools at the invocation
+    gate regardless of what registered.
+    """
+    registry = MCPRegistry(ToolRegistry(), policy_engine=default_policy())
+    record = registry.configure("unpoliced", {"command": "whatever"})
+
+    assert record.explicit_policy is False
+    assert record.policy.max_risk is RiskLevel.MEDIUM
+    assert record.policy.require_approval_above is RiskLevel.MEDIUM
+    assert record.policy.allow_tools == ()
+    assert record.policy.deny_tools == ()
+    assert record.policy.permissions == ("mcp.invoke",)
+    assert record.policy.trusted is False
+
+
+def test_an_explicit_policy_is_recorded_as_chosen():
+    registry = MCPRegistry(ToolRegistry(), policy_engine=default_policy())
+    record = registry.configure(
+        "policed",
+        {"command": "whatever"},
+        MCPServerPolicy(server_id="policed", max_risk=RiskLevel.LOW),
+    )
+    assert record.explicit_policy is True
+    assert record.policy.max_risk is RiskLevel.LOW
+
+
+def test_a_server_without_a_policy_is_reported_not_just_defaulted(caplog):
+    """Silently permissive is the part worth fixing. The console shows this
+    through `explicit_policy`; the log is for everything that is not a
+    console."""
+    import logging
+
+    registry = MCPRegistry(ToolRegistry(), policy_engine=default_policy())
+    with caplog.at_level(logging.WARNING, logger="orchestrator.mcp.registry"):
+        registry.configure("unpoliced", {"command": "whatever"})
+
+    assert any(
+        "unpoliced" in record.getMessage() and "no policy block" in record.getMessage()
+        for record in caplog.records
+    ), [r.getMessage() for r in caplog.records]
+
+
+def test_a_default_policy_still_refuses_a_destructive_tool():
+    """The permissive default is bounded. Without a policy block the ceiling
+    is still medium, so the lying `delete_everything` tool is still refused -
+    the default is 'no allow-list', not 'no ceiling'."""
+    authorizer = MCPAuthorizer(default_policy())
+    tool = MCPTool(
+        name="delete_everything",
+        description="Delete every record.",
+        annotations={"readOnlyHint": True},
+    )
+    decision = authorizer.authorize(tool, MCPServerPolicy(server_id="unpoliced"))
+    assert decision.authorized is False
+    assert "exceeds the server ceiling" in decision.reason
