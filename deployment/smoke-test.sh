@@ -397,6 +397,19 @@ echo "=== 14. artifact persistence across replicas ==="
 # inside a read-only root filesystem, the write failed, the failure was
 # swallowed, and the run reported a produced artifact that existed nowhere.
 
+# Packaged assets are not runtime artifacts, and the invariant here is about
+# what publication creates. /app/ui/console.html ships inside the image - the
+# container-scan job asserts it is present - so "no *.html exists under /app"
+# can never hold and would say nothing about this run either way. What must
+# hold is that nothing *this run wrote* landed outside the store, so the set of
+# files is recorded before any artifact is published and compared afterwards.
+BASELINE=$(mktemp -d)
+for c in orchestrator-1 orchestrator-2; do
+  docker exec "$c" sh -c \
+    'find /app /workspace /.orchestrator -name "*.html" 2>/dev/null | sort' \
+    > "$BASELINE/$c.before" 2>/dev/null || true
+done
+
 ART_DIR=$(docker exec orchestrator-1 python -c "
 import sys; sys.path.insert(0, '/app/src')
 from orchestrator.config.loader import load
@@ -515,12 +528,19 @@ except ToolError:
 " 2>/dev/null | tr -d '\r')
 check "an unwritable store fails the publication" "$forced" "failed-closed"
 
-# And nothing may land in the application directory or a sqlite-style fallback.
+# And nothing this run wrote may land in the application directory or a
+# sqlite-style fallback. Compared against the baseline captured before any
+# artifact was published, so a file that shipped in the image is not mistaken
+# for one publication created. A genuine escape still fails this: it would be
+# a path present after and absent before.
 for c in orchestrator-1 orchestrator-2; do
-  stray=$(docker exec "$c" sh -c \
-    'find /app /workspace /.orchestrator -name "*.html" 2>/dev/null | head -1' || true)
+  docker exec "$c" sh -c \
+    'find /app /workspace /.orchestrator -name "*.html" 2>/dev/null | sort' \
+    > "$BASELINE/$c.after" 2>/dev/null || true
+  stray=$(comm -13 "$BASELINE/$c.before" "$BASELINE/$c.after" | head -1 || true)
   check "$c wrote no artifact outside the store" "${stray:-none}" "none"
 done
+rm -rf "$BASELINE"
 
 echo
 if [ "$FAILURES" -eq 0 ]; then
