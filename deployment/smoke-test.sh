@@ -308,7 +308,32 @@ echo "=== 12. egress proxy enforcement ==="
 # the wrong reason. Squid was in a restart loop for exactly this reason during
 # development and the whole section looked green.
 $COMPOSE up -d egress >/dev/null 2>&1
-sleep 6
+
+# Wait for Squid to accept connections rather than guessing how long it takes.
+# `docker inspect` reports "running" as soon as the container starts, several
+# seconds before squid binds :3128, so the fixed `sleep 6` this replaced was a
+# bet on how loaded the machine is: it held on the CI runners and lost on a
+# developer box with other stacks up, where the probe below reported
+# proxy-unreachable and the section failed for a reason that had nothing to do
+# with egress. Bounded at ~60s, and deliberately not an assertion - a proxy
+# that never comes up still fails the checks below, which is where that
+# belongs.
+for _ in $(seq 1 30); do
+  if docker exec orchestrator-1 python -c "
+import socket, sys
+s = socket.socket(); s.settimeout(2)
+try:
+    s.connect(('egress', 3128))
+except Exception:
+    sys.exit(1)
+finally:
+    s.close()
+" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
+
 egress_state=$(docker inspect --format '{{.State.Status}}' orchestrator-egress-1 2>/dev/null || echo missing)
 check "egress proxy is running" "$egress_state" "running"
 
