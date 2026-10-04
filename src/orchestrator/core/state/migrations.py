@@ -176,16 +176,12 @@ MIGRATIONS: tuple[Migration, ...] = (
         # Retention scans by age. Without this it is a full table scan on the
         # one operation you run when the table is already large.
         sqlite=(
-            "CREATE INDEX IF NOT EXISTS idx_executions_updated "
-            "ON executions(updated_at)",
-            "CREATE INDEX IF NOT EXISTS idx_idempotency_created "
-            "ON idempotency(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_executions_updated ON executions(updated_at)",
+            "CREATE INDEX IF NOT EXISTS idx_idempotency_created ON idempotency(created_at)",
         ),
         postgres=(
-            "CREATE INDEX IF NOT EXISTS idx_executions_updated "
-            "ON executions(updated_at)",
-            "CREATE INDEX IF NOT EXISTS idx_idempotency_created "
-            "ON idempotency(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_executions_updated ON executions(updated_at)",
+            "CREATE INDEX IF NOT EXISTS idx_idempotency_created ON idempotency(created_at)",
         ),
     ),
     Migration(

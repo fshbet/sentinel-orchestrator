@@ -21,7 +21,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from orchestrator.core.domain.enums import ExecutionStatus
+from datetime import UTC
+
 from orchestrator.core.domain.models import Execution
 from orchestrator.core.state import migrations as m
 from orchestrator.core.state.store import ConcurrentModification, StateStore
@@ -45,9 +46,19 @@ def test_the_store_implements_the_state_store_contract():
     from orchestrator.core.state.postgres_store import PostgresStateStore
 
     assert issubclass(PostgresStateStore, StateStore)
-    for method in ("create", "get", "save", "list", "delete",
-                   "append_audit", "audit", "record_operation",
-                   "lookup_operation", "prune", "close"):
+    for method in (
+        "create",
+        "get",
+        "save",
+        "list",
+        "delete",
+        "append_audit",
+        "audit",
+        "record_operation",
+        "lookup_operation",
+        "prune",
+        "close",
+    ):
         assert hasattr(PostgresStateStore, method), method
 
 
@@ -91,13 +102,11 @@ def test_the_backend_is_selectable_by_configuration():
     from orchestrator.platform import _build_store
 
     with pytest.raises(ConfigurationError) as exc:
-        _build_store(Config({"profile": "development",
-                             "storage": {"backend": "postgres"}}))
+        _build_store(Config({"profile": "development", "storage": {"backend": "postgres"}}))
     assert "asynchronously" in str(exc.value)
 
     with pytest.raises(ConfigurationError) as exc:
-        _build_store(Config({"profile": "development",
-                             "storage": {"backend": "mysql"}}))
+        _build_store(Config({"profile": "development", "storage": {"backend": "mysql"}}))
     assert "sqlite" in str(exc.value) and "postgres" in str(exc.value)
 
 
@@ -163,9 +172,7 @@ def test_sqlite_applies_every_migration_and_is_idempotent(tmp_path):
 
     store = SQLiteStateStore(tmp_path / "state.db")
     try:
-        assert asyncio.run(store.applied_migrations()) == [
-            x.version for x in m.MIGRATIONS
-        ]
+        assert asyncio.run(store.applied_migrations()) == [x.version for x in m.MIGRATIONS]
         # Applying again does nothing.
         assert asyncio.run(store.migrate())["applied"] == []
 
@@ -215,9 +222,7 @@ def with_store(body):
         store = await PostgresStateStore.connect(DSN)
         try:
             async with store._pool.acquire() as connection:
-                await connection.execute(
-                    "TRUNCATE audit_events, executions, idempotency"
-                )
+                await connection.execute("TRUNCATE audit_events, executions, idempotency")
             return await body(store)
         finally:
             await store.close()
@@ -286,9 +291,7 @@ def test_two_concurrent_writers_produce_exactly_one_winner():
         a.objective = "writer a"
         b.objective = "writer b"
 
-        results = await asyncio.gather(
-            store.save(a), store.save(b), return_exceptions=True
-        )
+        results = await asyncio.gather(store.save(a), store.save(b), return_exceptions=True)
         failures = [r for r in results if isinstance(r, ConcurrentModification)]
         successes = [r for r in results if not isinstance(r, Exception)]
         assert len(successes) == 1, results
@@ -304,8 +307,12 @@ def test_the_audit_trail_stays_ordered_and_appends_only():
     async def body(store):
         execution = await store.create(_execution())
         events = [
-            AuditEvent(execution_id=execution.id, sequence=n,
-                       type="execution.created", payload={"n": n})
+            AuditEvent(
+                execution_id=execution.id,
+                sequence=n,
+                type="execution.created",
+                payload={"n": n},
+            )
             for n in range(1, 6)
         ]
         await store.append_audit(events)
@@ -326,10 +333,16 @@ def test_deleting_an_execution_takes_its_audit_trail_with_it():
 
     async def body(store):
         execution = await store.create(_execution())
-        await store.append_audit([
-            AuditEvent(execution_id=execution.id, sequence=1,
-                       type="execution.created", payload={})
-        ])
+        await store.append_audit(
+            [
+                AuditEvent(
+                    execution_id=execution.id,
+                    sequence=1,
+                    type="execution.created",
+                    payload={},
+                )
+            ]
+        )
         await store.delete(execution.id)
         assert await store.audit(execution.id) == []
 
@@ -387,20 +400,22 @@ def test_pagination_is_correct_under_a_tenant_filter():
 
 @requires_postgres
 def test_retention_deletes_terminal_work_and_keeps_the_rest():
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     async def body(store):
-        old = datetime.now(timezone.utc) - timedelta(days=200)
+        old = datetime.now(UTC) - timedelta(days=200)
         async with store._pool.acquire() as connection:
             for index, status in enumerate(
-                ("completed", "failed", "cancelled",
-                 "running", "waiting", "cancelling")
+                ("completed", "failed", "cancelled", "running", "waiting", "cancelling")
             ):
                 await connection.execute(
                     "INSERT INTO executions (id, objective, status, revision, "
                     "created_at, updated_at, document, tenant) "
                     "VALUES ($1,$2,$3,1,$4,$4,'{}'::jsonb,'default')",
-                    f"exe_{index}_{status}", "seeded", status, old,
+                    f"exe_{index}_{status}",
+                    "seeded",
+                    status,
+                    old,
                 )
 
         report = await store.prune(older_than_days=90)
@@ -444,8 +459,16 @@ def test_the_real_schema_has_the_columns_and_indexes_migrations_declare():
                     "WHERE table_name = 'executions'"
                 )
             }
-            assert {"id", "objective", "status", "revision", "created_at",
-                    "updated_at", "document", "tenant"} <= columns
+            assert {
+                "id",
+                "objective",
+                "status",
+                "revision",
+                "created_at",
+                "updated_at",
+                "document",
+                "tenant",
+            } <= columns
 
             indexes = {
                 row["indexname"]
@@ -470,9 +493,7 @@ def test_state_survives_a_reconnect():
         first = await PostgresStateStore.connect(DSN)
         try:
             async with first._pool.acquire() as connection:
-                await connection.execute(
-                    "TRUNCATE audit_events, executions, idempotency"
-                )
+                await connection.execute("TRUNCATE audit_events, executions, idempotency")
             execution = await first.create(_execution("survives a restart"))
         finally:
             await first.close()
@@ -514,6 +535,7 @@ def test_an_orchestrator_starts_on_postgres_and_runs_an_execution():
     import tempfile
 
     from conftest import planning_model
+
     from orchestrator.config.loader import load
     from orchestrator.platform import Orchestrator
 
@@ -565,6 +587,7 @@ def test_no_sqlite_file_is_created_when_the_backend_is_postgres(tmp_path):
     import os
 
     from conftest import planning_model
+
     from orchestrator.config.loader import load
     from orchestrator.platform import Orchestrator
 
@@ -587,7 +610,9 @@ def test_no_sqlite_file_is_created_when_the_backend_is_postgres(tmp_path):
 
     async def main():
         orchestrator = await Orchestrator.create(
-            config=config, connect_mcp=False, workspace=str(tmp_path),
+            config=config,
+            connect_mcp=False,
+            workspace=str(tmp_path),
             providers=[planning_model()],
         )
         try:
@@ -625,7 +650,7 @@ def test_only_placeholders_are_interpolated_into_sqlite_sql():
     from orchestrator.core.state.sqlite_store import SQLiteStateStore
 
     source = inspect.getsource(SQLiteStateStore._prune)
-    match = re.search(r'placeholders = ([^\n]+)', source)
+    match = re.search(r"placeholders = ([^\n]+)", source)
     assert match, "expected the placeholder list to be built explicitly"
     built = match.group(1)
     # It joins "?" — not a status, not a caller value.

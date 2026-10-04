@@ -77,8 +77,7 @@ class OpenHandsAdapter(ExecutionAdapter):
             import httpx
         except ImportError as exc:  # pragma: no cover - environment dependent
             raise ModelUnavailable(
-                "the OpenHands adapter requires httpx; install"
-                " universal-orchestrator[http]"
+                "the OpenHands adapter requires httpx; install universal-orchestrator[http]"
             ) from exc
         headers = {"Content-Type": "application/json"}
         if self.config.api_key:
@@ -97,7 +96,9 @@ class OpenHandsAdapter(ExecutionAdapter):
             f"Your task: {brief.objective}",
         ]
         if brief.expected_outputs:
-            sections.append("Expected outputs:\n" + "\n".join(f"- {o}" for o in brief.expected_outputs))
+            sections.append(
+                "Expected outputs:\n" + "\n".join(f"- {o}" for o in brief.expected_outputs)
+            )
         if brief.completion_criteria:
             sections.append(
                 "This is complete when:\n"
@@ -137,9 +138,7 @@ class OpenHandsAdapter(ExecutionAdapter):
             try:
                 response = await client.post(self.config.endpoints.create, json=payload)
             except Exception as exc:  # noqa: BLE001 - connection problems are failures
-                return self._failure(
-                    context.task, f"could not reach OpenHands: {exc}"
-                )
+                return self._failure(context.task, f"could not reach OpenHands: {exc}")
             if response.status_code >= 400:
                 return self._failure(
                     context.task,
@@ -246,7 +245,7 @@ class OpenHandsAdapter(ExecutionAdapter):
     async def _stop(self, client, conversation_id: str) -> None:
         try:
             await client.post(self.config.endpoints.stop.format(id=conversation_id))
-        except Exception:  # noqa: BLE001 - best effort
+        except Exception:  # noqa: BLE001, S110 - best effort
             pass
 
 

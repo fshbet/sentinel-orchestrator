@@ -14,10 +14,12 @@ import abc
 import asyncio
 import json
 import os
+import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
-from ..errors import MCPProtocolError, MCPTimeout, MCPError
+from ..errors import MCPError, MCPProtocolError, MCPTimeout
 
 JSONRPC_VERSION = "2.0"
 
@@ -62,7 +64,7 @@ class Transport(abc.ABC):
             return
         try:
             self.on_notification(message.get("method", ""), message.get("params") or {})
-        except Exception:  # noqa: BLE001 - a handler must not break the transport
+        except Exception:  # noqa: BLE001, S110 - a handler must not break the transport
             pass
 
 
@@ -90,13 +92,45 @@ class StdioTransport(Transport):
         self._next_id = 0
         self._closed = False
         self._stderr_tail: list[str] = []
+        # The executable actually spawned, once resolved. Kept apart from
+        # `command` so diagnostics still name what was configured.
+        self.executable: str | None = None
+        # Frames the server sent that this client could not decode. A server
+        # emitting these looks exactly like a slow one until the request times
+        # out, so they are counted rather than dropped.
+        self._undecodable = 0
+        self._undecodable_sample = ""
+
+    def _resolve_executable(self, environment: dict[str, str]) -> str:
+        """The executable to spawn, resolved the way a shell would resolve it.
+
+        `create_subprocess_exec` reaches CreateProcess on Windows, which does
+        not consult PATHEXT. A bare `npx` therefore fails there with "cannot
+        find the file specified" while `npx.cmd` works, so a configuration that
+        runs on one platform breaks on another. `shutil.which` does consult
+        PATHEXT, and leaves absolute paths and ordinary PATH lookup unchanged,
+        so one configuration works everywhere. `tools/execpolicy.py` resolves
+        executables the same way.
+
+        PATH comes from the environment the child will actually receive, so a
+        server that sets its own PATH is resolved against that one.
+        """
+        resolved = shutil.which(self.command, path=environment.get("PATH"))
+        if resolved is None:
+            raise MCPError(
+                f"could not start MCP server {self.command}: no such executable on PATH",
+                command=self.command,
+            )
+        return resolved
 
     async def start(self) -> None:
         environment = dict(os.environ) if self.inherit_env else {}
         environment.update(self.env)
+        executable = self._resolve_executable(environment)
+        self.executable = executable
         try:
             self._process = await asyncio.create_subprocess_exec(
-                self.command,
+                executable,
                 *self.args,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
@@ -108,6 +142,7 @@ class StdioTransport(Transport):
             raise MCPError(
                 f"could not start MCP server {self.command}: {exc}",
                 command=self.command,
+                executable=executable,
             ) from exc
         self._reader_task = asyncio.ensure_future(self._read_loop())
         asyncio.ensure_future(self._drain_stderr())
@@ -130,6 +165,12 @@ class StdioTransport(Transport):
             try:
                 message = json.loads(text)
             except json.JSONDecodeError:
+                # Recorded, not discarded: see `_undecodable`. Reading on is
+                # still right, because one unparseable line should not end an
+                # otherwise working session.
+                self._undecodable += 1
+                if not self._undecodable_sample:
+                    self._undecodable_sample = text[:120]
                 continue
             self._handle_message(message)
         self._fail_pending(MCPError("MCP server closed the connection"))
@@ -193,7 +234,7 @@ class StdioTransport(Transport):
         )
         try:
             return await asyncio.wait_for(future, timeout=timeout)
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             self._pending.pop(request_id, None)
             # Tell the server to stop working on it (spec: cancellation).
             try:
@@ -201,8 +242,21 @@ class StdioTransport(Transport):
                     "notifications/cancelled",
                     {"requestId": request_id, "reason": "client timeout"},
                 )
-            except Exception:  # noqa: BLE001 - best effort
+            except Exception:  # noqa: BLE001, S110 - best effort
                 pass
+            if self._undecodable:
+                # Calling this a timeout sends whoever is debugging it after a
+                # slow server when the real fault is one that is not speaking
+                # the protocol. The sample is truncated because undecodable
+                # output is unstructured by definition.
+                raise MCPProtocolError(
+                    f"MCP server sent {self._undecodable} frame(s) this client"
+                    f" could not decode while waiting for {method};"
+                    f" first was {self._undecodable_sample!r}",
+                    method=method,
+                    undecodable_frames=self._undecodable,
+                    sample=self._undecodable_sample,
+                ) from exc
             raise MCPTimeout(
                 f"MCP request {method} timed out after {timeout}s", method=method
             ) from exc
@@ -221,7 +275,7 @@ class StdioTransport(Transport):
                 self._process.stdin.close()
             try:
                 await asyncio.wait_for(self._process.wait(), timeout=5.0)
-            except asyncio.TimeoutError:  # pragma: no cover - stubborn child
+            except TimeoutError:  # pragma: no cover - stubborn child
                 self._process.kill()
                 await self._process.wait()
         self._fail_pending(MCPError("transport closed"))
@@ -232,7 +286,9 @@ class StdioTransport(Transport):
             target=" ".join([self.command, *self.args]),
             detail={
                 "pid": self._process.pid if self._process else None,
+                "executable": self.executable,
                 "stderr_tail": self._stderr_tail[-5:],
+                "undecodable_frames": self._undecodable,
             },
         )
 
@@ -261,8 +317,7 @@ class StreamableHTTPTransport(Transport):
             import httpx
         except ImportError as exc:  # pragma: no cover - environment dependent
             raise MCPError(
-                "HTTP MCP transport requires httpx; install"
-                " universal-orchestrator[http]"
+                "HTTP MCP transport requires httpx; install universal-orchestrator[http]"
             ) from exc
         return httpx
 
@@ -322,9 +377,7 @@ class StreamableHTTPTransport(Transport):
         result: Any = None
         for block in body.split("\n\n"):
             data_lines = [
-                line[5:].strip()
-                for line in block.splitlines()
-                if line.startswith("data:")
+                line[5:].strip() for line in block.splitlines() if line.startswith("data:")
             ]
             if not data_lines:
                 continue

@@ -17,7 +17,8 @@ even when two different ids sanitise to the same string.
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 _ILLEGAL = re.compile(r"[^a-zA-Z0-9_-]")
 MAX_NAME_LENGTH = 64

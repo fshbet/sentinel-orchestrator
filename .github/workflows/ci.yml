@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Without this, a feature branch cannot be checked at all: the push trigger
+  # is limited to main and the only other entry point is opening a pull
+  # request. A branch that cannot be checked until it is proposed for merge is
+  # the same shape of problem as a check that cannot fail.
+  workflow_dispatch:
 
 jobs:
   test:
@@ -22,7 +27,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Install
-        run: pip install -e ".[api,yaml,http,dev]"
+        run: pip install -e ".[api,yaml,http,cli,dev]"
       - name: Test
         run: python -m pytest tests/ -q
 
@@ -127,7 +132,7 @@ jobs:
       - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
         with:
           python-version: "3.12"
-      - run: pip install -e ".[api,yaml,http,dev]" ruff mypy
+      - run: pip install -e ".[api,yaml,http,cli,dev,lint]"
       - name: Lint
         run: ruff check src/ tests/
       - name: Format check
@@ -138,10 +143,12 @@ jobs:
         run: |
           mapfile -t MODULES < <(grep -v '^#' typed-modules.txt | grep -v '^$')
           mypy "${MODULES[@]}"
-      - name: Type check (reported, not gating)
-        # The legacy remainder. Reported so the debt is visible and countable.
-        run: |
-          mypy src/orchestrator 2>&1 | tail -1 || true
+      - name: Type check (whole tree, gating)
+        # This used to be `|| true` while the remainder of the tree carried
+        # type debt. The debt is now zero, so the step gates: a check that
+        # cannot fail is a check that does nothing, and the only way the
+        # count stays at zero is if adding to it breaks the build.
+        run: mypy src/orchestrator
 
   dependency-audit:
     runs-on: ubuntu-latest
@@ -152,11 +159,16 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[api,yaml,http,postgres]" pip-audit
       - name: Known vulnerabilities in declared dependencies
-        # A fresh venv, so this audits *this project's* dependency surface
-        # rather than everything else on the runner image. Auditing the
-        # ambient environment produces findings for packages the project
-        # does not use, which trains people to ignore the job.
-        run: pip-audit --strict --desc -r <(pip freeze | grep -viE '^(pip|pip-audit)')
+        # Audits *this project's* dependency surface rather than everything
+        # else on the runner image, which would produce findings for packages
+        # the project does not use and train people to ignore the job.
+        # --exclude-editable drops this project itself: it is not on PyPI, and
+        # --strict makes a requirement it cannot resolve a failure.
+        run: |
+          pip freeze --exclude-editable | grep -viE '^(pip|pip-audit)==' > requirements-audit.txt || true
+          # An empty list would make the audit pass while checking nothing.
+          test -s requirements-audit.txt
+          pip-audit --strict --desc -r requirements-audit.txt
 
   static-security-analysis:
     runs-on: ubuntu-latest
@@ -192,9 +204,32 @@ jobs:
       - name: Build
         run: docker build -t orchestrator:scan .
       - name: Scan the image
-        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0  # v0.29.0
+        # This step has been broken twice by the same root cause, so it is
+        # worth writing down once: pinning an action by SHA pins the action,
+        # not the things the action reaches for at runtime.
+        #
+        # First, v0.29.0's action.yaml referenced `setup-trivy@v0.2.2`, a tag
+        # since deleted upstream, and every run died at "Set up job". v0.31.0
+        # onwards reference setup-trivy by SHA, which fixed that.
+        #
+        # Then v0.33.1 got as far as "Run Trivy" being skipped, because its
+        # `version` input *defaults* to v0.65.0 and that Trivy release no
+        # longer exists either - the API returns 404 for the tag, and
+        # setup-trivy installs by asking GitHub for exactly that tag, so the
+        # install exited 1 before the scanner was ever invoked.
+        #
+        # Hence an explicit version rather than the action's default: the
+        # default is somebody else's moving part. v0.74.0 is pinned and its
+        # `trivy_0.74.0_Linux-64bit.tar.gz` asset was confirmed present,
+        # matching what contrib/install.sh builds its download URL from.
+        #
+        # Thresholds are unchanged and deliberately so: HIGH,CRITICAL still
+        # fails the build, and a failure here once Trivy actually runs is a
+        # finding about the image, not a problem with this step.
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8  # v0.33.1
         with:
           image-ref: orchestrator:scan
+          version: v0.74.0
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
@@ -262,14 +297,14 @@ jobs:
           ORCHESTRATOR_TEST_POSTGRES_DSN: >-
             postgresql://orchestrator:ci-only-not-a-real-secret@localhost:5432/orchestrator_test
         run: |
-          python -m pytest tests/test_postgres_store.py \n                          tests/test_shared_tokens.py -q
+          python -m pytest tests/test_postgres_store.py tests/test_shared_tokens.py -q
       - name: Nothing was skipped for want of a database
         env:
           ORCHESTRATOR_TEST_POSTGRES_DSN: >-
             postgresql://orchestrator:ci-only-not-a-real-secret@localhost:5432/orchestrator_test
         run: |
           # A gated suite that silently skips in CI proves nothing.
-          python -m pytest tests/test_postgres_store.py \n                          tests/test_shared_tokens.py -q 2>&1 | tee out.txt
+          python -m pytest tests/test_postgres_store.py tests/test_shared_tokens.py -q 2>&1 | tee out.txt
           if grep -qE '[0-9]+ skipped' out.txt; then
             echo "::error::PostgreSQL tests were skipped in CI"
             exit 1
@@ -285,7 +320,7 @@ jobs:
       - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
         with:
           python-version: "3.12"
-      - run: pip install -e ".[api,yaml,http,dev]"
+      - run: pip install -e ".[api,yaml,http,cli,dev]"
       - name: Security and policy cases must all pass
         run: python -m orchestrator.cli.main evaluate --suite security
       - name: Full suite with a quality floor

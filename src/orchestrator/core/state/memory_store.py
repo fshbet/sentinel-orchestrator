@@ -8,8 +8,14 @@ sharing mutable objects with the engine.
 from __future__ import annotations
 
 import asyncio
+
+# `builtins` is imported because the registries below expose a public
+# `list()` method, which shadows the builtin inside their own class body.
+# `-> builtins.list[X]` is the annotation that keeps the method name.
+import builtins
 import json
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from ...errors import NotFound
 from ..domain.enums import ExecutionStatus
@@ -95,7 +101,7 @@ class InMemoryStateStore(StateStore):
 
     async def audit(
         self, execution_id: str, *, after_sequence: int = 0, limit: int = 1000
-    ) -> list[AuditEvent]:
+    ) -> builtins.list[AuditEvent]:
         async with self._lock:
             bucket = self._audit.get(execution_id, [])
             return [e for e in bucket if e.sequence > after_sequence][:limit]

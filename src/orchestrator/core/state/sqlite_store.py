@@ -10,12 +10,19 @@ the async engine is never stalled.
 from __future__ import annotations
 
 import asyncio
+
+# `builtins` is imported because the registries below expose a public
+# `list()` method, which shadows the builtin inside their own class body.
+# `-> builtins.list[X]` is the annotation that keeps the method name.
+import builtins
 import json
 import os
 import sqlite3
 import threading
+from collections.abc import Sequence
+from datetime import UTC
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from ...errors import NotFound
 from ..domain.enums import ExecutionStatus
@@ -66,6 +73,7 @@ CREATE TABLE IF NOT EXISTS idempotency (
 """
 
 SCHEMA_VERSION = "1"
+
 
 # What retention is allowed to delete, derived from the enum rather than
 # retyped here.
@@ -119,7 +127,7 @@ class SQLiteStateStore(StateStore):
 
     def _migrate_locked(self) -> list[str]:
         """Apply pending migrations. Idempotent; safe to call every open."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         applied = self._applied_locked()
         _migrations.check_compatible(applied)
@@ -135,16 +143,14 @@ class SQLiteStateStore(StateStore):
                 # goal already met, not a failure — anything else is real.
                 if "duplicate column" not in str(exc).lower():
                     raise _migrations.MigrationFailed(
-                        f"migration {migration.version} ({migration.name}) "
-                        f"failed: {exc}",
+                        f"migration {migration.version} ({migration.name}) failed: {exc}",
                         version=migration.version,
                         name=migration.name,
                     ) from exc
             self._conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) "
                 "VALUES (?, ?, ?)",
-                (migration.version, migration.name,
-                 datetime.now(timezone.utc).isoformat()),
+                (migration.version, migration.name, datetime.now(UTC).isoformat()),
             )
             performed.append(migration.name)
         self._conn.commit()
@@ -245,8 +251,7 @@ class SQLiteStateStore(StateStore):
         self, status: ExecutionStatus | None, limit: int, offset: int
     ) -> list[ExecutionSummary]:
         sql = (
-            "SELECT id, objective, status, revision, created_at, updated_at"
-            " FROM executions"
+            "SELECT id, objective, status, revision, created_at, updated_at FROM executions"
         )
         params: list[Any] = []
         if status is not None:
@@ -306,18 +311,16 @@ class SQLiteStateStore(StateStore):
           attributed to anything, which is worse than either keeping both or
           removing both.
         """
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(days=older_than_days)
-        ).isoformat()
+        cutoff = (datetime.now(UTC) - timedelta(days=older_than_days)).isoformat()
 
         # `placeholders` is a run of "?" characters and nothing else — one
         # per status — so the only thing interpolated is punctuation. Every
         # value is bound. Pinned by test_only_placeholders_are_interpolated.
         placeholders = ",".join("?" for _ in prunable)
         rows = self._conn.execute(
-            f"SELECT id FROM executions "  # nosec B608 - placeholders only
+            f"SELECT id FROM executions "  # noqa: S608  # nosec B608 - placeholders only
             f"WHERE updated_at < ? AND status IN ({placeholders})",
             (cutoff, *prunable),
         ).fetchall()
@@ -329,9 +332,7 @@ class SQLiteStateStore(StateStore):
                 "DELETE FROM audit_events WHERE execution_id = ?", (execution_id,)
             )
             removed_events += cursor.rowcount or 0
-            self._conn.execute(
-                "DELETE FROM executions WHERE id = ?", (execution_id,)
-            )
+            self._conn.execute("DELETE FROM executions WHERE id = ?", (execution_id,))
 
         # Idempotency keys are a replay guard with a short useful life; once
         # the execution they guarded is gone they protect nothing.
@@ -421,7 +422,7 @@ class SQLiteStateStore(StateStore):
 
     def _audit(
         self, execution_id: str, after_sequence: int, limit: int
-    ) -> list[AuditEvent]:
+    ) -> builtins.list[AuditEvent]:
         rows = self._conn.execute(
             "SELECT * FROM audit_events WHERE execution_id = ? AND sequence > ?"
             " ORDER BY sequence ASC LIMIT ?",
@@ -445,7 +446,7 @@ class SQLiteStateStore(StateStore):
 
     async def audit(
         self, execution_id: str, *, after_sequence: int = 0, limit: int = 1000
-    ) -> list[AuditEvent]:
+    ) -> builtins.list[AuditEvent]:
         return await self._run(self._audit, execution_id, after_sequence, limit)
 
     # -- idempotency -------------------------------------------------------

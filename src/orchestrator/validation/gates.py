@@ -9,10 +9,10 @@ any agent or model reported (spec sections 34, 73).
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Sequence
 
-from ..core.domain.enums import Confidence
+from ..core.domain.enums import Confidence, TaskStatus
 from ..core.domain.models import Evidence, Execution, Task, ValidationResult, ValidationSpec
 from ..observability.audit import AuditLog, EventType
 from .validators import ValidationContext, ValidatorRegistry
@@ -204,6 +204,25 @@ class GateRunner:
         return outcome
 
 
+def _superseded_by_a_later_attempt(execution: Execution, result) -> bool:
+    """Did a retry replace this failure?
+
+    ``execution.validations`` is append-only, so a task that failed its check
+    on attempt one and passed it on attempt two leaves both records behind.
+    Counting the stale failure made retrying pointless for any task with a
+    mandatory validator: the first failure blocked completion permanently, no
+    matter how well the retry went. A run whose task genuinely failed is still
+    caught - by the task's own status, checked separately below.
+
+    Only task-scoped results are forgiven, and only when that task reached
+    SUCCEEDED, which it can only do by passing its mandatory gate.
+    """
+    task = execution.tasks.get(result.target_id)
+    if task is None:
+        return False
+    return task.status is TaskStatus.SUCCEEDED
+
+
 def can_complete(execution: Execution) -> tuple[bool, str]:
     """Structural check used before an execution may be marked COMPLETED.
 
@@ -213,18 +232,16 @@ def can_complete(execution: Execution) -> tuple[bool, str]:
     failed = [
         result
         for result in execution.validations
-        if result.mandatory and not result.passed
+        if result.mandatory
+        and not result.passed
+        and not _superseded_by_a_later_attempt(execution, result)
     ]
     if failed:
         return False, (
             "mandatory validations failed: "
             + ", ".join(f"{r.validator} ({r.message[:80]})" for r in failed[:5])
         )
-    unfinished = [
-        task
-        for task in execution.tasks.values()
-        if not task.is_terminal
-    ]
+    unfinished = [task for task in execution.tasks.values() if not task.is_terminal]
     if unfinished:
         return False, f"{len(unfinished)} tasks have not reached a terminal state"
     failed_tasks = [t for t in execution.tasks.values() if t.status.value == "failed"]

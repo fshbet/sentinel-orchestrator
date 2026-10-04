@@ -47,7 +47,7 @@ class SubOrchestrationRuntime(BaseRuntime):
 
     def __init__(
         self,
-        engine: "ExecutionEngine",
+        engine: ExecutionEngine,
         *,
         max_depth: int = 2,
         budget_share: float = DEFAULT_BUDGET_SHARE,
@@ -113,9 +113,7 @@ class SubOrchestrationRuntime(BaseRuntime):
             )
         upstream = [
             f"- {dep.name}: {(dep.result.summary or '')[:400]}"
-            for dep in (
-                context.execution.tasks.get(d) for d in task.dependencies
-            )
+            for dep in (context.execution.tasks.get(d) for d in task.dependencies)
             if dep is not None and dep.result is not None
         ]
         if upstream:
@@ -137,9 +135,7 @@ class SubOrchestrationRuntime(BaseRuntime):
             ),
             max_model_calls=remaining(limits.max_model_calls, used.model_calls),
             max_tool_calls=remaining(limits.max_tool_calls, used.tool_calls),
-            max_tokens=remaining(
-                limits.max_tokens, used.input_tokens + used.output_tokens
-            ),
+            max_tokens=remaining(limits.max_tokens, used.input_tokens + used.output_tokens),
             max_cost=(
                 None
                 if limits.max_cost is None

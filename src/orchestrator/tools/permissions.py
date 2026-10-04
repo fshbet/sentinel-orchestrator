@@ -8,7 +8,7 @@ inventing its own namespace.
 
 from __future__ import annotations
 
-from typing import Iterable, Sequence
+from collections.abc import Iterable, Sequence
 
 # Filesystem
 FS_READ = "fs.read"
@@ -33,7 +33,7 @@ ARTIFACT_WRITE = "artifact.write"
 MCP_INVOKE = "mcp.invoke"
 
 # Secrets. Never granted by default, and never logged.
-SECRET_READ = "secret.read"
+SECRET_READ = "secret.read"  # noqa: S105 - a permission name, not a credential
 
 ALL = (
     FS_READ,

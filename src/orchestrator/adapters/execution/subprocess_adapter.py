@@ -14,7 +14,8 @@ import asyncio
 import json
 import os
 import shlex
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from ...agents.runtime import AgentRunContext
 from ...core.domain.enums import IsolationLevel
@@ -94,12 +95,10 @@ class SubprocessAdapter(ExecutionAdapter):
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(payload.encode("utf-8")), timeout=timeout
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             process.kill()
             await process.wait()
-            return self._failure(
-                context.task, f"worker did not finish within {timeout}s"
-            )
+            return self._failure(context.task, f"worker did not finish within {timeout}s")
 
         if process.returncode != 0:
             return self._failure(

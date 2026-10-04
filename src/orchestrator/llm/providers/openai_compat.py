@@ -11,13 +11,12 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from ...core.domain.enums import ModelCapability
 from ...core.domain.models import ModelSpec, Usage
 from ...errors import ModelError, ModelTimeout, ModelUnavailable
-from ..toolcalls import recover
-from ..toolnames import build_mapping, rename_tools, restore
 from ..base import (
     CompletionRequest,
     LLMProvider,
@@ -25,6 +24,8 @@ from ..base import (
     ProviderHealth,
     ToolCallRequest,
 )
+from ..toolcalls import recover
+from ..toolnames import build_mapping, rename_tools, restore
 
 
 def _require_httpx():
@@ -136,9 +137,7 @@ class OpenAICompatibleProvider(LLMProvider):
 
     # -- generation --------------------------------------------------------
 
-    async def generate(
-        self, request: CompletionRequest, model: ModelSpec
-    ) -> ModelResponse:
+    async def generate(self, request: CompletionRequest, model: ModelSpec) -> ModelResponse:
         httpx = _require_httpx()
         mapping = build_mapping(request.tools)
         payload = self._payload(request, model, mapping)
@@ -198,7 +197,7 @@ class OpenAICompatibleProvider(LLMProvider):
         message = choices[0].get("message") or {}
         text = message.get("content") or ""
 
-        tool_calls = []
+        tool_calls: list[ToolCallRequest] = []
         for raw in message.get("tool_calls") or []:
             function = raw.get("function") or {}
             arguments = function.get("arguments")
@@ -304,9 +303,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 )
             payload = response.json()
             served = [
-                str(entry.get("id"))
-                for entry in payload.get("data", [])
-                if entry.get("id")
+                str(entry.get("id")) for entry in payload.get("data", []) if entry.get("id")
             ]
             return ProviderHealth(
                 provider=self.name,
@@ -315,13 +312,9 @@ class OpenAICompatibleProvider(LLMProvider):
                 latency_ms=latency,
             )
         except Exception as exc:  # noqa: BLE001 - health must never raise
-            return ProviderHealth(
-                provider=self.name, available=False, error=str(exc)
-            )
+            return ProviderHealth(provider=self.name, available=False, error=str(exc))
 
-    async def embed(
-        self, texts: Sequence[str], model: ModelSpec
-    ) -> list[list[float]]:
+    async def embed(self, texts: Sequence[str], model: ModelSpec) -> list[list[float]]:
         httpx = _require_httpx()
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.post(

@@ -45,23 +45,56 @@ from ..errors import PermissionDenied
 
 # Interpreters that execute arbitrary text. Permitting one of these makes
 # every other entry in an allowlist decorative.
-SHELL_INTERPRETERS = frozenset({
-    "sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "ash",
-    "cmd", "cmd.exe", "command.com",
-    "powershell", "powershell.exe", "pwsh", "pwsh.exe",
-    "busybox", "env", "xargs", "nohup", "timeout", "nice", "setsid",
-})
+SHELL_INTERPRETERS = frozenset(
+    {
+        "sh",
+        "bash",
+        "zsh",
+        "fish",
+        "dash",
+        "ksh",
+        "csh",
+        "tcsh",
+        "ash",
+        "cmd",
+        "cmd.exe",
+        "command.com",
+        "powershell",
+        "powershell.exe",
+        "pwsh",
+        "pwsh.exe",
+        "busybox",
+        "env",
+        "xargs",
+        "nohup",
+        "timeout",
+        "nice",
+        "setsid",
+    }
+)
 
 # Variables that turn a permitted executable into arbitrary code execution by
 # changing what it loads before its own main() runs. Never passable, whatever
 # an allowlist says.
-FORBIDDEN_ENVIRONMENT = frozenset({
-    "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT",
-    "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH",
-    "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME",
-    "NODE_OPTIONS", "PERL5OPT", "RUBYOPT",
-    "BASH_ENV", "ENV", "IFS",
-})
+FORBIDDEN_ENVIRONMENT = frozenset(
+    {
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "LD_AUDIT",
+        "DYLD_INSERT_LIBRARIES",
+        "DYLD_LIBRARY_PATH",
+        "DYLD_FRAMEWORK_PATH",
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "PYTHONHOME",
+        "NODE_OPTIONS",
+        "PERL5OPT",
+        "RUBYOPT",
+        "BASH_ENV",
+        "ENV",
+        "IFS",
+    }
+)
 
 # Enough PATH for a permitted executable to find its own helpers. Not the
 # orchestrator's PATH, which may point at developer tooling.
@@ -92,12 +125,8 @@ class ExecPolicy:
     max_output_bytes: int = 100_000
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "allowed_commands", tuple(self.allowed_commands)
-        )
-        object.__setattr__(
-            self, "environment_allowlist", tuple(self.environment_allowlist)
-        )
+        object.__setattr__(self, "allowed_commands", tuple(self.allowed_commands))
+        object.__setattr__(self, "environment_allowlist", tuple(self.environment_allowlist))
 
     def validate(self) -> None:
         """Check the configuration itself. Called before any process starts.
@@ -149,8 +178,7 @@ class ExecPolicy:
                 re.compile(pattern)
             except re.error as exc:
                 raise ValueError(
-                    f"denied_argument_patterns contains an invalid regex "
-                    f"{pattern!r}: {exc}"
+                    f"denied_argument_patterns contains an invalid regex {pattern!r}: {exc}"
                 ) from exc
 
     def resolved_allowlist(self) -> dict[str, str]:
@@ -162,15 +190,49 @@ class ExecPolicy:
         """
         resolved: dict[str, str] = {}
         for command in self.allowed_commands:
-            found = shutil.which(command)
-            if found is None and Path(command).exists():
-                found = command
+            found = self._locate(command)
             if found is not None:
                 try:
                     resolved[str(Path(found).resolve())] = command
                 except OSError:  # pragma: no cover - unusual filesystems
                     resolved[found] = command
         return resolved
+
+    def allowed_access_paths(self) -> set[str]:
+        """The paths the allowlist names, before any link is followed.
+
+        ``resolved_allowlist`` answers "which file is this", by real path, and
+        that is what stops a copy or a link planted under a permitted name
+        from being run. It does not stop the inverse. Allowing a symlink would
+        otherwise also allow its target under the target's own name, because
+        the two share a real path - and an operator who permitted
+        ``/usr/local/bin/safe-wrapper`` has not permitted the interpreter it
+        happens to point at.
+
+        So an executable has to satisfy both: the file must be the permitted
+        file, and the path used to reach it must be a permitted path. Absolute
+        but deliberately *not* resolved, since resolving is the thing being
+        guarded against here.
+        """
+        paths: set[str] = set()
+        for command in self.allowed_commands:
+            found = self._locate(command)
+            if found is not None:
+                paths.add(os.path.abspath(found))
+        return paths
+
+    @staticmethod
+    def _locate(command: str) -> str | None:
+        """Where a configured entry is found on disk, or None.
+
+        An entry that does not resolve is reported as missing rather than
+        dropped, so a typo surfaces as "not in the allowed list" at call time
+        instead of silently shrinking the allowlist to nothing.
+        """
+        found = shutil.which(command)
+        if found is None and Path(command).exists():
+            found = command
+        return found
 
     def check_arguments(self, argv: Sequence[str]) -> None:
         if len(argv) > self.max_arguments:
@@ -185,8 +247,7 @@ class ExecPolicy:
             for argument in argv:
                 if compiled.search(argument):
                     raise PermissionDenied(
-                        f"argument {argument!r} matches the denied pattern "
-                        f"{pattern!r}",
+                        f"argument {argument!r} matches the denied pattern {pattern!r}",
                         argument=argument,
                         pattern=pattern,
                     )
@@ -239,10 +300,23 @@ def resolve_executable(command: str, policy: ExecPolicy) -> str:
     allowed = policy.resolved_allowlist()
     if real not in allowed:
         raise PermissionDenied(
-            f"executable {command!r} resolves to {real}, which is not in the "
-            f"allowed list",
+            f"executable {command!r} resolves to {real}, which is not in the allowed list",
             command=command,
             resolved=real,
+            allowed=list(policy.allowed_commands),
+        )
+
+    # The file is permitted. The path used to reach it has to be permitted too,
+    # or allowing a symlink would silently allow its target under the target's
+    # own name: both share a real path, so the check above cannot tell them
+    # apart. See ExecPolicy.allowed_access_paths.
+    if os.path.abspath(found) not in policy.allowed_access_paths():
+        raise PermissionDenied(
+            f"executable {command!r} is the permitted file {real} reached by a "
+            f"path that is not in the allowed list",
+            command=command,
+            resolved=real,
+            accessed=os.path.abspath(found),
             allowed=list(policy.allowed_commands),
         )
 
@@ -270,8 +344,14 @@ def build_environment(
     # Windows processes fail in obscure ways without these, and none of them
     # carry credentials.
     if os.name == "nt":
-        for required in ("SYSTEMROOT", "COMSPEC", "NUMBER_OF_PROCESSORS",
-                         "PROCESSOR_ARCHITECTURE", "TEMP", "TMP"):
+        for required in (
+            "SYSTEMROOT",
+            "COMSPEC",
+            "NUMBER_OF_PROCESSORS",
+            "PROCESSOR_ARCHITECTURE",
+            "TEMP",
+            "TMP",
+        ):
             value = os.environ.get(required)
             if value:
                 env[required] = value

@@ -11,8 +11,8 @@ tasks holding half of each other's resources structurally impossible.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Sequence
 
 
 class ResourceLockManager:
@@ -32,7 +32,9 @@ class ResourceLockManager:
         return self._holders.get(resource)
 
     def busy(self, resources: Sequence[str]) -> list[str]:
-        return [r for r in resources if self._locks.get(r, None) and self._locks[r].locked()]
+        return [
+            r for r in resources if self._locks.get(r, None) and self._locks[r].locked()
+        ]
 
     def available(self, resources: Sequence[str]) -> bool:
         return not self.busy(resources)

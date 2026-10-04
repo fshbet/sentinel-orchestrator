@@ -123,8 +123,7 @@ def test_an_allowed_url_is_fetched(server):
 def test_a_redirect_to_the_metadata_service_is_refused(server):
     """Before egress.py this returned AWS credentials."""
     with pytest.raises(PermissionDenied) as exc:
-        _call(_tools(server), "http.request",
-              url=f"http://{server}/redirect-to-metadata")
+        _call(_tools(server), "http.request", url=f"http://{server}/redirect-to-metadata")
     assert "metadata" in str(exc.value).lower()
 
 
@@ -142,15 +141,21 @@ def test_a_redirect_off_the_allowlist_is_refused(server):
 
 def test_a_redirect_loop_stops_at_the_configured_limit(server):
     with pytest.raises(ToolError) as exc:
-        _call(_tools(server, max_redirects=2), "http.request",
-              url=f"http://{server}/redirect-loop")
+        _call(
+            _tools(server, max_redirects=2),
+            "http.request",
+            url=f"http://{server}/redirect-loop",
+        )
     assert "redirect" in str(exc.value).lower()
 
 
 def test_zero_redirects_means_none_are_followed(server):
     with pytest.raises(ToolError):
-        _call(_tools(server, max_redirects=0), "http.request",
-              url=f"http://{server}/redirect-loop")
+        _call(
+            _tools(server, max_redirects=0),
+            "http.request",
+            url=f"http://{server}/redirect-loop",
+        )
 
 
 # --------------------------------------------------------------------------
@@ -159,8 +164,9 @@ def test_zero_redirects_means_none_are_followed(server):
 
 
 def test_an_oversized_response_is_truncated_at_the_limit(server):
-    result = _call(_tools(server, max_response_bytes=1000), "http.request",
-                   url=f"http://{server}/big")
+    result = _call(
+        _tools(server, max_response_bytes=1000), "http.request", url=f"http://{server}/big"
+    )
     assert result["truncated"] is True
     assert result["bytes"] <= 1000
 
@@ -173,8 +179,12 @@ def test_an_oversized_response_is_truncated_at_the_limit(server):
 def test_the_read_tool_cannot_be_used_to_post(server):
     """Otherwise network.read silently includes the ability to send data out."""
     with pytest.raises(PermissionDenied) as exc:
-        _call(_tools(server, allowed_methods=("GET", "POST")), "http.request",
-              url=f"http://{server}/ok", method="POST")
+        _call(
+            _tools(server, allowed_methods=("GET", "POST")),
+            "http.request",
+            url=f"http://{server}/ok",
+            method="POST",
+        )
     assert "network.write" in str(exc.value)
 
 
@@ -189,15 +199,20 @@ def test_the_write_tool_appears_only_when_a_write_method_is_configured(server):
     assert "http.send" in tools
     spec, _ = tools["http.send"]
     assert "network.write" in spec.permissions
-    result = _call(tools, "http.send", url=f"http://{server}/ok", method="POST",
-                   body="data")
+    result = _call(
+        tools, "http.send", url=f"http://{server}/ok", method="POST", body="data"
+    )
     assert result["status"] == 200
 
 
 def test_a_method_outside_the_configured_set_is_refused(server):
     with pytest.raises(PermissionDenied):
-        _call(_tools(server, allowed_methods=("GET",)), "http.request",
-              url=f"http://{server}/ok", method="DELETE")
+        _call(
+            _tools(server, allowed_methods=("GET",)),
+            "http.request",
+            url=f"http://{server}/ok",
+            method="DELETE",
+        )
 
 
 # --------------------------------------------------------------------------
@@ -208,14 +223,21 @@ def test_a_method_outside_the_configured_set_is_refused(server):
 def test_an_authorization_header_cannot_be_smuggled_out(server):
     """A model that has seen a token must not be able to forward it."""
     with pytest.raises(PermissionDenied) as exc:
-        _call(_tools(server), "http.request", url=f"http://{server}/echo-headers",
-              headers={"Authorization": "Bearer stolen"})
+        _call(
+            _tools(server),
+            "http.request",
+            url=f"http://{server}/echo-headers",
+            headers={"Authorization": "Bearer stolen"},
+        )
     assert "authorization" in str(exc.value).lower()
 
 
 def test_permitted_headers_are_sent(server):
-    result = _call(_tools(server), "http.request",
-                   url=f"http://{server}/echo-headers",
-                   headers={"Accept": "application/json"})
+    result = _call(
+        _tools(server),
+        "http.request",
+        url=f"http://{server}/echo-headers",
+        headers={"Accept": "application/json"},
+    )
     assert result["status"] == 200
     assert "application/json" in result["body"]

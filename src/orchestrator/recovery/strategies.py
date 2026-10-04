@@ -7,8 +7,8 @@ never at an unbounded retry loop (spec sections 37, 95, 98).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Sequence
 
 from ..core.domain.enums import FailureCategory, RecoveryStrategy
 from ..core.domain.models import Failure, ResourceLimits, Task
@@ -118,7 +118,10 @@ class RecoveryPolicy:
             return False
         if strategy is RecoveryStrategy.ALTERNATE_AGENT and not self.allow_dynamic_agents:
             return False
-        if strategy is RecoveryStrategy.REQUEST_HUMAN_INPUT and not self.allow_human_escalation:
+        if (
+            strategy is RecoveryStrategy.REQUEST_HUMAN_INPUT
+            and not self.allow_human_escalation
+        ):
             return False
         return True
 
@@ -130,7 +133,9 @@ class StrategyChoice:
     exhausted: bool = False
 
 
-def previous_strategies(failures: Sequence[Failure], task_id: str | None) -> list[RecoveryStrategy]:
+def previous_strategies(
+    failures: Sequence[Failure], task_id: str | None
+) -> list[RecoveryStrategy]:
     return [
         failure.recovery
         for failure in failures

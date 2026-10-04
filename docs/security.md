@@ -120,6 +120,33 @@ to run the orchestrator, and are your responsibility to actually provide.
 * Constant-time comparison; multiple tokens accepted for rotation.
 * Tokens come from `ORCHESTRATOR_API_TOKEN`, never from a config file.
 
+## Artifact storage
+
+Publishing a deliverable is a separate permission from writing files. An agent
+holding `artifact.write` may call `orchestrator.emit_artifact`; it still cannot
+write anywhere else, and `tools.filesystem.allow_write` can remain `false`.
+
+The boundary:
+
+| Control | Behaviour |
+|---|---|
+| Name is untrusted input | Reduced to one filename component — separators, `..`, drive letters, and Windows reserved device names are stripped, not resolved. |
+| Store confinement | The resolved path must be a direct child of the execution's directory, checked after resolution. |
+| Symlinks | A target that is a symbolic link is refused rather than followed. |
+| Per-execution separation | One directory per execution id; no run can write into another's. |
+| Collisions | Identical content reuses the file; different content is versioned (`name-2.ext`). Nothing is silently overwritten. |
+| Integrity | SHA-256 and byte size recorded at write time and re-checked by `artifact_exists`. |
+| Failure | Unwritable store raises; the publication does not succeed and no record is kept. |
+| Error text | Names the artifact and the error class, never the store path — that text reaches the model and API responses. |
+
+### Residual risk
+
+The store is a shared volume, so an agent that can publish can consume disk in
+it. There is no per-execution quota; cap the volume at the Docker level if that
+matters. Artifacts are stored unencrypted at rest — treat the volume as holding
+whatever classification the runs handle.
+
+
 ## Secrets
 
 * Provider keys are read from environment variables named in config. The

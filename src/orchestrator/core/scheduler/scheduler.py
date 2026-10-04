@@ -8,8 +8,8 @@ asks a model what to run next (spec sections 31, 106).
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Sequence
 
 from ..domain.models import ResourceLimits, Task
 from ..workflow.graph import TaskGraph
@@ -129,9 +129,7 @@ class Scheduler:
                     await asyncio.sleep(0.005)
                     continue
 
-                done, _ = await asyncio.wait(
-                    pending, return_when=asyncio.FIRST_COMPLETED
-                )
+                done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
                 for handle in done:
                     pending.pop(handle, None)
                     exc = handle.exception()

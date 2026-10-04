@@ -42,8 +42,7 @@ from orchestrator.observability.metrics import Metrics
 def _full_scope():
     """A scope wide enough to run a bookkeeping tool."""
     return PermissionScope(
-        permissions=("memory.write", "memory.read", "state.read",
-                     "artifact.write"),
+        permissions=("memory.write", "memory.read", "state.read", "artifact.write"),
         tools=("*",),
     )
 
@@ -60,31 +59,44 @@ def _build_orchestrator(collector):
     running model server and take minutes.
     """
     from conftest import make_config
+
     from orchestrator.platform import Orchestrator
 
     # A development profile: make_config() declares none, so it would
     # otherwise resolve to production and deny every tool. Correct platform
     # behaviour, wrong fixture for exercising tool metrics.
-    return asyncio.run(Orchestrator.create(
-        config=make_config(profile="development"),
-        connect_mcp=False,
-        metrics=collector,
-    ))
+    return asyncio.run(
+        Orchestrator.create(
+            config=make_config(profile="development"),
+            connect_mcp=False,
+            metrics=collector,
+        )
+    )
 
 
 def _app(collector, orchestrator=None, **kwargs):
-    registry = IdentityRegistry([
-        TokenPrincipal("admin-token", Principal(
-            id="admin", scopes=expand_scopes([ADMIN]), token_id="ENV_ADMIN")),
-        TokenPrincipal("reader-token", Principal(
-            id="reader", scopes=expand_scopes([EXECUTIONS_READ]),
-            token_id="ENV_READER")),
-    ])
+    registry = IdentityRegistry(
+        [
+            TokenPrincipal(
+                "admin-token",
+                Principal(id="admin", scopes=expand_scopes([ADMIN]), token_id="ENV_ADMIN"),
+            ),
+            TokenPrincipal(
+                "reader-token",
+                Principal(
+                    id="reader",
+                    scopes=expand_scopes([EXECUTIONS_READ]),
+                    token_id="ENV_READER",
+                ),
+            ),
+        ]
+    )
     return create_app(
         security=SecurityConfig(host="0.0.0.0", tokens=("unused",)),
         identity_registry=registry,
         metrics_collector=collector,
-        orchestrator=orchestrator if orchestrator is not None
+        orchestrator=orchestrator
+        if orchestrator is not None
         else _build_orchestrator(collector),
         **kwargs,
     )
@@ -118,7 +130,7 @@ def test_an_authentication_failure_shows_up_in_metrics():
     client = TestClient(_app(collector))
 
     before = _series(_scrape(client), "orchestrator_security_events_total")
-    client.get("/v1/executions")                       # no credential
+    client.get("/v1/executions")  # no credential
     client.get("/v1/executions", headers=_auth("wrong"))
     after = _series(_scrape(client), "orchestrator_security_events_total")
 
@@ -130,8 +142,11 @@ def test_an_authorization_failure_shows_up_in_metrics():
     collector = Metrics()
     client = TestClient(_app(collector))
 
-    client.post("/v1/executions", headers=_auth("reader-token"),
-                json={"objective": "x", "run": False})
+    client.post(
+        "/v1/executions",
+        headers=_auth("reader-token"),
+        json={"objective": "x", "run": False},
+    )
     body = _scrape(client)
     assert 'orchestrator_security_events_total{reason="authorization"}' in body
 
@@ -163,19 +178,27 @@ def test_a_rate_limit_event_shows_up_in_metrics():
 def test_an_oversized_body_is_refused_and_counted():
     """With a limit small enough that the request genuinely exceeds it."""
     collector = Metrics()
-    registry = IdentityRegistry([
-        TokenPrincipal("admin-token", Principal(
-            id="admin", scopes=expand_scopes([ADMIN]), token_id="ENV_ADMIN")),
-    ])
-    client = TestClient(create_app(
-        security=SecurityConfig(host="0.0.0.0", tokens=("unused",),
-                                max_body_bytes=500),
-        identity_registry=registry,
-        metrics_collector=collector,
-        orchestrator=_build_orchestrator(collector),
-    ))
-    refused = client.post("/v1/executions", headers=_auth("admin-token"),
-                          json={"objective": "x" * 50_000, "run": False})
+    registry = IdentityRegistry(
+        [
+            TokenPrincipal(
+                "admin-token",
+                Principal(id="admin", scopes=expand_scopes([ADMIN]), token_id="ENV_ADMIN"),
+            ),
+        ]
+    )
+    client = TestClient(
+        create_app(
+            security=SecurityConfig(host="0.0.0.0", tokens=("unused",), max_body_bytes=500),
+            identity_registry=registry,
+            metrics_collector=collector,
+            orchestrator=_build_orchestrator(collector),
+        )
+    )
+    refused = client.post(
+        "/v1/executions",
+        headers=_auth("admin-token"),
+        json={"objective": "x" * 50_000, "run": False},
+    )
     assert refused.status_code == 413
     assert "orchestrator_security_events_total" in _scrape(client)
 
@@ -192,10 +215,15 @@ def test_a_delete_with_a_body_is_also_bounded():
         return {"ok": True}
 
     client = TestClient(app)
-    assert client.request(
-        "DELETE", "/v1/thing", content=b"x" * 5000,
-        headers={"Content-Type": "application/json"},
-    ).status_code == 413
+    assert (
+        client.request(
+            "DELETE",
+            "/v1/thing",
+            content=b"x" * 5000,
+            headers={"Content-Type": "application/json"},
+        ).status_code
+        == 413
+    )
     # A small body still works.
     assert client.request("DELETE", "/v1/thing", content=b"ok").status_code == 200
 
@@ -212,14 +240,17 @@ def _completing_orchestrator(collector):
     behaviour, but not a terminal state, so it exercises nothing here.
     """
     from conftest import make_config, planning_model
+
     from orchestrator.platform import Orchestrator
 
-    return asyncio.run(Orchestrator.create(
-        config=make_config(profile="development"),
-        connect_mcp=False,
-        providers=[planning_model()],
-        metrics=collector,
-    ))
+    return asyncio.run(
+        Orchestrator.create(
+            config=make_config(profile="development"),
+            connect_mcp=False,
+            providers=[planning_model()],
+            metrics=collector,
+        )
+    )
 
 
 def test_running_an_execution_records_a_terminal_outcome():
@@ -229,9 +260,11 @@ def test_running_an_execution_records_a_terminal_outcome():
     client = TestClient(_app(collector, orchestrator=orc))
     try:
         before = _series(_scrape(client), "orchestrator_executions_total")
-        response = client.post("/v1/executions", headers=_auth("admin-token"),
-                               json={"objective": "record a terminal outcome",
-                                     "run": True})
+        response = client.post(
+            "/v1/executions",
+            headers=_auth("admin-token"),
+            json={"objective": "record a terminal outcome", "run": True},
+        )
         assert response.status_code == 201, response.text
         assert response.json()["status"] == "completed", response.text
 
@@ -248,8 +281,11 @@ def test_a_run_that_stops_to_ask_a_human_is_not_counted_as_terminal():
     """`waiting` is blocked, not finished. Counting it would inflate the rate."""
     collector = Metrics()
     client = TestClient(_app(collector))
-    response = client.post("/v1/executions", headers=_auth("admin-token"),
-                           json={"objective": "needs a human", "run": True})
+    response = client.post(
+        "/v1/executions",
+        headers=_auth("admin-token"),
+        json={"objective": "needs a human", "run": True},
+    )
     assert response.json()["status"] == "waiting"
     assert "orchestrator_executions_total" not in _scrape(client)
 
@@ -260,8 +296,11 @@ def test_a_terminal_outcome_is_recorded_exactly_once():
     orc = _completing_orchestrator(collector)
     client = TestClient(_app(collector, orchestrator=orc))
     try:
-        client.post("/v1/executions", headers=_auth("admin-token"),
-                    json={"objective": "count me once", "run": True})
+        client.post(
+            "/v1/executions",
+            headers=_auth("admin-token"),
+            json={"objective": "count me once", "run": True},
+        )
         assert _series(_scrape(client), "orchestrator_executions_total") == 1
     finally:
         asyncio.run(orc.close())
@@ -270,8 +309,11 @@ def test_a_terminal_outcome_is_recorded_exactly_once():
 def test_the_point_in_time_gauges_reflect_real_state():
     collector = Metrics()
     client = TestClient(_app(collector))
-    client.post("/v1/executions", headers=_auth("admin-token"),
-                json={"objective": "populate the gauges", "run": True})
+    client.post(
+        "/v1/executions",
+        headers=_auth("admin-token"),
+        json={"objective": "populate the gauges", "run": True},
+    )
 
     body = _scrape(client)
     assert "orchestrator_executions_current" in body
@@ -281,8 +323,11 @@ def test_the_point_in_time_gauges_reflect_real_state():
 def test_queue_wait_is_recorded_when_an_execution_starts():
     collector = Metrics()
     client = TestClient(_app(collector))
-    client.post("/v1/executions", headers=_auth("admin-token"),
-                json={"objective": "measure queue wait", "run": True})
+    client.post(
+        "/v1/executions",
+        headers=_auth("admin-token"),
+        json={"objective": "measure queue wait", "run": True},
+    )
     assert "orchestrator_queue_wait_seconds_count" in _scrape(client)
 
 
@@ -293,6 +338,7 @@ def test_queue_wait_is_recorded_when_an_execution_starts():
 
 def _orchestrator(collector, **overrides):
     from conftest import make_config
+
     from orchestrator.platform import Orchestrator
 
     overrides.setdefault("profile", "development")
@@ -330,10 +376,12 @@ def test_a_successful_tool_call_is_counted():
         assert "orchestrator.record_note" in tool_ids, tool_ids
         target = "orchestrator.record_note"
 
-        asyncio.run(orc.tools.call(
-            ToolCall(tool_id=target, arguments={"key": "k", "value": "v"}),
-            ToolContext(execution_id="e", task_id="t", scope=_full_scope()),
-        ))
+        asyncio.run(
+            orc.tools.call(
+                ToolCall(tool_id=target, arguments={"key": "k", "value": "v"}),
+                ToolContext(execution_id="e", task_id="t", scope=_full_scope()),
+            )
+        )
         body = collector.render()
         assert "orchestrator_tool_calls_total" in body
         assert 'outcome="ok"' in body
@@ -351,11 +399,13 @@ def test_a_denied_tool_call_is_counted_as_denied_and_as_a_policy_denial():
     try:
         target = "orchestrator.record_note"
         with pytest.raises(PermissionDenied):
-            asyncio.run(orc.tools.call(
-                ToolCall(tool_id=target, arguments={}),
-                # An empty scope grants nothing.
-                ToolContext(execution_id="e", task_id="t", scope=PermissionScope()),
-            ))
+            asyncio.run(
+                orc.tools.call(
+                    ToolCall(tool_id=target, arguments={}),
+                    # An empty scope grants nothing.
+                    ToolContext(execution_id="e", task_id="t", scope=PermissionScope()),
+                )
+            )
         body = collector.render()
         assert 'outcome="denied"' in body
         assert "orchestrator_policy_denials_total" in body
@@ -385,6 +435,7 @@ class _BrokenMetrics:
     def __getattr__(self, name):
         def explode(*args, **kwargs):
             raise RuntimeError("metrics backend is on fire")
+
         return explode
 
 
@@ -393,15 +444,23 @@ def test_a_broken_collector_never_fails_an_api_request():
     # Authentication failure records a metric; it must still be a clean 401.
     assert client.get("/v1/executions").status_code == 401
     # And an authorization failure a clean 403.
-    assert client.post("/v1/executions", headers=_auth("reader-token"),
-                       json={"objective": "x", "run": False}).status_code == 403
+    assert (
+        client.post(
+            "/v1/executions",
+            headers=_auth("reader-token"),
+            json={"objective": "x", "run": False},
+        ).status_code
+        == 403
+    )
 
 
 def test_a_broken_collector_never_fails_an_execution():
     client = TestClient(_app(_BrokenMetrics()))
-    response = client.post("/v1/executions", headers=_auth("admin-token"),
-                           json={"objective": "survive broken metrics",
-                                 "run": True})
+    response = client.post(
+        "/v1/executions",
+        headers=_auth("admin-token"),
+        json={"objective": "survive broken metrics", "run": True},
+    )
     assert response.status_code == 201, response.text
 
 
@@ -412,10 +471,12 @@ def test_a_broken_collector_never_fails_a_tool_call():
     orc = _orchestrator(_BrokenMetrics())
     try:
         target = "orchestrator.record_note"
-        result = asyncio.run(orc.tools.call(
-            ToolCall(tool_id=target, arguments={"key": "k", "value": "v"}),
-            ToolContext(execution_id="e", task_id="t", scope=_full_scope()),
-        ))
+        result = asyncio.run(
+            orc.tools.call(
+                ToolCall(tool_id=target, arguments={"key": "k", "value": "v"}),
+                ToolContext(execution_id="e", task_id="t", scope=_full_scope()),
+            )
+        )
         assert result.ok is True
     finally:
         asyncio.run(orc.close())
@@ -430,8 +491,11 @@ def test_no_identifier_or_free_text_appears_in_real_metrics_output():
     collector = Metrics()
     client = TestClient(_app(collector))
     objective = "a distinctive objective string nobody should ever see in metrics"
-    created = client.post("/v1/executions", headers=_auth("admin-token"),
-                          json={"objective": objective, "run": True})
+    created = client.post(
+        "/v1/executions",
+        headers=_auth("admin-token"),
+        json={"objective": objective, "run": True},
+    )
     execution_id = created.json()["id"]
 
     body = _scrape(client)

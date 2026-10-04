@@ -64,9 +64,13 @@ class LimitGuard:
         usage = self.usage
 
         if self.elapsed > limits.max_wall_seconds:
-            return LimitStatus(True, "wall clock", round(self.elapsed, 1), limits.max_wall_seconds)
+            return LimitStatus(
+                True, "wall clock", round(self.elapsed, 1), limits.max_wall_seconds
+            )
         if usage.model_calls >= limits.max_model_calls:
-            return LimitStatus(True, "model calls", usage.model_calls, limits.max_model_calls)
+            return LimitStatus(
+                True, "model calls", usage.model_calls, limits.max_model_calls
+            )
         if usage.tool_calls >= limits.max_tool_calls:
             return LimitStatus(True, "tool calls", usage.tool_calls, limits.max_tool_calls)
         if usage.input_tokens + usage.output_tokens >= limits.max_tokens:
@@ -108,9 +112,7 @@ class LimitGuard:
             "wall_seconds": max(0.0, limits.max_wall_seconds - self.elapsed),
             "model_calls": max(0, limits.max_model_calls - usage.model_calls),
             "tool_calls": max(0, limits.max_tool_calls - usage.tool_calls),
-            "tokens": max(
-                0, limits.max_tokens - usage.input_tokens - usage.output_tokens
-            ),
+            "tokens": max(0, limits.max_tokens - usage.input_tokens - usage.output_tokens),
             "external_requests": max(
                 0, limits.max_external_requests - usage.external_requests
             ),

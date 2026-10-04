@@ -42,11 +42,16 @@ x-orchestrator: &orchestrator
     NO_PROXY: postgres,egress,localhost,127.0.0.1
   volumes:
     - ./config.production.yaml:/etc/orchestrator/config.yaml:ro
+    # Published artifacts. Shared between both replicas so a file written
+    # through one is readable through the other, and mounted outside the
+    # workspace so publishing a result never requires write access to the
+    # application directory. storage.artifact_dir must match this path.
+    - orchestrator-artifacts:/var/lib/orchestrator/artifacts
   # Hardening. Each line removes something the process does not need.
   read_only: true
   tmpfs:
-    # The only writable paths. The workspace is declared in the config; there
-    # is no writable application directory and no state on disk at all.
+    # /tmp and the artifact volume are the only writable paths. There is no
+    # writable application directory and no state file on disk.
     - /tmp:mode=1777,size=64m
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
@@ -64,6 +69,10 @@ x-orchestrator: &orchestrator
     postgres:
       condition: service_healthy
     migrate:
+      condition: service_completed_successfully
+    # The artifact volume must be owned by 10001 before either replica tries
+    # to publish into it.
+    artifact-init:
       condition: service_completed_successfully
   networks: [internal]
 
@@ -122,6 +131,19 @@ services:
         condition: service_healthy
     networks: [internal]
 
+  # A named volume is created root-owned. The orchestrator runs as 10001 and
+  # cannot chown it, so a one-shot root container does it before either
+  # replica starts. Without this the first publish fails on EACCES - which is
+  # now a loud failure rather than a silent one, but a failure either way.
+  artifact-init:
+    image: busybox:1.36
+    command: ["sh", "-c", "mkdir -p /artifacts && chown 10001:10001 /artifacts && chmod 700 /artifacts"]
+    volumes:
+      - orchestrator-artifacts:/artifacts
+    user: "0:0"
+    restart: "no"
+    networks: [internal]
+
   orchestrator-1:
     <<: *orchestrator
     container_name: orchestrator-1
@@ -178,6 +200,10 @@ services:
 
 volumes:
   postgres-data:
+  # Published artifacts, shared by both replicas. Separate from postgres-data
+  # so a database restore never silently replaces delivered output, and from
+  # the application image so it survives a redeploy.
+  orchestrator-artifacts:
   caddy-data:
   caddy-config:
 

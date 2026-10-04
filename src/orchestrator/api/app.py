@@ -8,14 +8,26 @@ execution to completion.
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import Any
 
 from ..config.loader import load
-from ..core.domain.enums import ExecutionStatus, OrchestrationPattern, PlanStrategy
+from ..core.domain.enums import (
+    TERMINAL_EXECUTION_STATUSES,
+    ExecutionStatus,
+    OrchestrationPattern,
+    PlanStrategy,
+)
 from ..core.domain.models import ResourceLimits
-from ..errors import ConfigurationError, NotFound, OrchestratorError
+from ..errors import (
+    ConfigurationError,
+    NotFound,
+    OrchestratorError,
+    PolicyViolation,
+)
 from ..platform import Orchestrator
 from ..validation.advocate import summarise as advocate_summary
+from . import settings as _settings
 from .security import SecurityConfig
 from .security import install as install_security
 
@@ -63,11 +75,25 @@ _LOG = logging.getLogger("orchestrator.api")
 # Error context keys that carry filesystem layout or credentials. The message
 # itself is authored by this codebase and safe to return; the structured
 # context is where absolute paths and tokens accumulate.
-_UNSAFE_ERROR_KEYS = frozenset({
-    "path", "root", "cwd", "file", "filename", "directory", "workspace",
-    "token", "api_key", "key", "secret", "password", "authorization",
-    "traceback", "stack",
-})
+_UNSAFE_ERROR_KEYS = frozenset(
+    {
+        "path",
+        "root",
+        "cwd",
+        "file",
+        "filename",
+        "directory",
+        "workspace",
+        "token",
+        "api_key",
+        "key",
+        "secret",
+        "password",
+        "authorization",
+        "traceback",
+        "stack",
+    }
+)
 
 
 def _safe_error(exc) -> dict:
@@ -90,7 +116,6 @@ def _safe_error(exc) -> dict:
     # Recursive: to_dict() nests the useful context under "details", so a
     # single-level filter left every path in place.
     return redact(strip(raw))
-
 
 
 def _shared_identities(config, api_section, state):
@@ -132,16 +157,19 @@ def _shared_identities(config, api_section, state):
 
     # Count what configuration declares, not what the database holds.
     configured = sum(
-        1 for raw in (api_section.get("principals") or [])
+        1
+        for raw in (api_section.get("principals") or [])
         if isinstance(raw, dict)
         and os.environ.get(str(raw.get("token_env") or ""), "").strip()
     )
-    configured += len([
-        t for t in os.environ.get("ORCHESTRATOR_API_TOKEN", "").split(",") if t.strip()
-    ])
+    configured += len(
+        [t for t in os.environ.get("ORCHESTRATOR_API_TOKEN", "").split(",") if t.strip()]
+    )
 
     return SharedIdentityRegistry(
-        store, multi_tenant=multi_tenant, token_count=configured,
+        store,
+        multi_tenant=multi_tenant,
+        token_count=configured,
         seed=api_section,
     )
 
@@ -173,9 +201,7 @@ def create_app(
     class StartRequest(BaseModel):
         objective: str = Field(..., min_length=1, description="What to accomplish.")
         context: dict[str, Any] = Field(default_factory=dict)
-        pattern: str | None = Field(
-            None, description="Force an orchestration pattern."
-        )
+        pattern: str | None = Field(None, description="Force an orchestration pattern.")
         plan_strategy: str | None = Field(None, description="Force a plan strategy.")
         run: bool = Field(True, description="Run immediately, or only create.")
         limits: dict[str, Any] | None = None
@@ -184,6 +210,15 @@ def create_app(
         approved: bool = True
         response: Any = None
         responder: str | None = None
+
+    class KeyRequest(BaseModel):
+        # An empty string is meaningful: it removes the credential. That is the
+        # only way to un-set one from the console, so it must not be rejected
+        # as a missing field.
+        value: str = Field("", description="The credential. Empty removes it.")
+
+    class ProfileRequest(BaseModel):
+        profile: str = Field(..., description="development, internal-pilot, or production.")
 
     from contextlib import asynccontextmanager
 
@@ -197,6 +232,18 @@ def create_app(
         store = state.get("token_store")
         if store is not None and getattr(identities, "seed", None):
             await store.seed_from_config(identities.seed)
+
+        # Credentials saved through the console live in a file, not the
+        # environment, so they must be loaded before any provider is built.
+        # Anything already exported wins - see settings.load_secrets.
+        try:
+            loaded = _settings.load_secrets(
+                load(paths=[config_path] if config_path else None)
+            )
+            if loaded:
+                _LOG.info("loaded %d stored credential(s)", len(loaded))
+        except Exception:  # noqa: BLE001 - never block startup on this
+            _LOG.warning("could not load stored credentials", exc_info=True)
         yield
         # Only close what this app created; an injected orchestrator is the
         # caller's to manage.
@@ -254,9 +301,9 @@ def create_app(
     try:
         from ..config.loader import load as _load2
 
-        _rate_config = _load2(
-            paths=[config_path] if config_path else None
-        ).get("api.rate_limit", {})
+        _rate_config = _load2(paths=[config_path] if config_path else None).get(
+            "api.rate_limit", {}
+        )
     except Exception:  # noqa: BLE001 - config errors surface on first use
         _rate_config = {}
     limiter, limit = build_limiter(_rate_config)
@@ -342,7 +389,16 @@ def create_app(
 
     @app.exception_handler(OrchestratorError)
     async def orchestrator_error_handler(request, exc: OrchestratorError):
-        status = 404 if isinstance(exc, NotFound) else 400
+        # A refusal is not a malformed request. The console shows the two
+        # differently - one is "fix your input", the other is "this deployment
+        # will not let you do that", and collapsing both into 400 made a
+        # deliberate policy decision look like a client bug.
+        if isinstance(exc, NotFound):
+            status = 404
+        elif isinstance(exc, PolicyViolation):
+            status = 403
+        else:
+            status = 400
         return JSONResponse(
             status_code=status,
             content={
@@ -442,9 +498,7 @@ def create_app(
     async def create_execution(http_request: Request, request: StartRequest = Body(...)):
         orc = await get_orchestrator()
         principal = caller(http_request)
-        kwargs: dict[str, Any] = {
-            "context": stamp_ownership(request.context, principal)
-        }
+        kwargs: dict[str, Any] = {"context": stamp_ownership(request.context, principal)}
         if request.pattern:
             kwargs["pattern"] = OrchestrationPattern(request.pattern)
         if request.plan_strategy:
@@ -514,6 +568,39 @@ def create_app(
         orc, _ = await owned_execution(execution_id, http_request)
         return execution_payload(await orc.cancel(execution_id, reason=reason))
 
+    @app.delete(f"/{API_VERSION}/executions/{{execution_id}}", status_code=200)
+    async def delete_execution(execution_id: str, http_request: Request):
+        """Delete one run and everything recorded about it.
+
+        Refuses while the run is still live. Deleting the record of something
+        that is currently executing does not stop it - it removes the only
+        place its progress, its approvals, and its audit trail are written
+        down, leaving work running that nothing is tracking. Cancel first.
+
+        The deletion is permanent and takes the audit trail with it, which is
+        the point: this is how someone removes a run whose objective or result
+        should not be sitting on the disk. It is recorded in the audit log of
+        the *system*, not of the deleted run, for the obvious reason.
+        """
+        orc, execution = await owned_execution(execution_id, http_request)
+        if execution.status not in TERMINAL_EXECUTION_STATUSES:
+            raise ConfigurationError(
+                f"this run is {execution.status.value}, not finished; cancel it "
+                "before deleting, so nothing keeps running unrecorded.",
+                remedy="POST .../cancel first, then delete",
+            )
+
+        log = audit_log()
+        if log is not None:
+            log.record(
+                "execution.deleted",
+                execution_id=execution_id,
+                actor=getattr(caller(http_request), "id", "local"),
+                status=execution.status.value,
+            )
+        await orc.store.delete(execution_id)
+        return {"deleted": execution_id}
+
     @app.get(f"/{API_VERSION}/executions/{{execution_id}}/audit")
     async def get_audit(
         execution_id: str, http_request: Request, after: int = Query(0, ge=0)
@@ -563,9 +650,7 @@ def create_app(
         return {"tokens": listed}
 
     @app.post(f"/{API_VERSION}/tokens/{{token_id}}/revoke")
-    async def revoke_token(
-        token_id: str, http_request: Request, reason: str = Query("")
-    ):
+    async def revoke_token(token_id: str, http_request: Request, reason: str = Query("")):
         """Revoke a token by id. Effective on the next request, no restart.
 
         Per-instance: behind a load balancer this reaches the replica that
@@ -577,8 +662,10 @@ def create_app(
         if identities is None or not hasattr(identities, "revoke"):
             return JSONResponse(
                 status_code=404,
-                content={"error": "not_found",
-                         "message": "token management is not enabled"},
+                content={
+                    "error": "not_found",
+                    "message": "token management is not enabled",
+                },
             )
 
         import inspect
@@ -593,8 +680,7 @@ def create_app(
         if not revoked:
             return JSONResponse(
                 status_code=404,
-                content={"error": "not_found",
-                         "message": f"no token with id {token_id}"},
+                content={"error": "not_found", "message": f"no token with id {token_id}"},
             )
 
         log = audit_log()
@@ -606,8 +692,9 @@ def create_app(
                 reason=reason,
                 request_id=getattr(http_request.state, "request_id", ""),
             )
-        distributed = bool(getattr(getattr(identities, "tokens", None),
-                                   "distributed", False))
+        distributed = bool(
+            getattr(getattr(identities, "tokens", None), "distributed", False)
+        )
         return {
             "revoked": True,
             "token_id": token_id,
@@ -654,6 +741,74 @@ def create_app(
         if orc.mcp is None:
             return {"servers": []}
         return {"servers": await orc.mcp.health()}
+
+    # -- settings ----------------------------------------------------------
+    #
+    # Read by anyone who may reach the API; written only in the development
+    # profile. See orchestrator.api.settings for why that asymmetry is the
+    # whole design rather than a limitation.
+
+    def _config():
+        """The loaded configuration, without forcing a full orchestrator."""
+        orc = state.get("orchestrator")
+        if orc is not None and getattr(orc, "config", None) is not None:
+            return orc.config
+        return load(paths=[config_path] if config_path else None)
+
+    def _invalidate_orchestrator() -> None:
+        """Drop the cached orchestrator so the next call rebuilds it.
+
+        Providers read their credential once, at construction. Without this a
+        key saved through the console would sit in the environment doing
+        nothing until someone restarted the process - which looks exactly like
+        the key being wrong.
+        """
+        state["orchestrator"] = None
+
+    @app.get(f"/{API_VERSION}/settings")
+    async def get_settings():
+        return _settings.describe(_config())
+
+    @app.put(f"/{API_VERSION}/settings/keys/{{env_name}}")
+    async def put_provider_key(
+        env_name: str, http_request: Request, request: KeyRequest = Body(...)
+    ):
+        config = _config()
+        result = _settings.set_provider_key(config, env_name, request.value)
+        _invalidate_orchestrator()
+
+        log = audit_log()
+        if log is not None:
+            # The name, never the value - and only that a change happened.
+            log.record(
+                "settings.credential_changed",
+                actor=getattr(caller(http_request), "id", "local"),
+                variable=result["env"],
+                present=result.get("set", False),
+            )
+        return {"key": result, "reload": "applied to the next run"}
+
+    @app.put(f"/{API_VERSION}/settings/profile")
+    async def put_profile(http_request: Request, request: ProfileRequest = Body(...)):
+        config = _config()
+        written = _settings.set_profile(config, request.profile, config_path=config_path)
+        log = audit_log()
+        if log is not None:
+            log.record(
+                "settings.profile_changed",
+                actor=getattr(caller(http_request), "id", "local"),
+                profile=request.profile,
+            )
+        return {
+            "profile": request.profile,
+            "written": Path(written).name,
+            "restart_required": True,
+            "note": (
+                "Saved. A profile decides tool permissions, egress rules, and "
+                "whether a token is required, so it takes effect on restart "
+                "rather than mid-request."
+            ),
+        }
 
     # -- console -----------------------------------------------------------
 
@@ -731,9 +886,7 @@ def create_app(
         if not orc.router.all_models():
             content = {"status": "not_ready"}
             if detailed:
-                content["reason"] = (
-                    "no models are registered, so no work can run"
-                )
+                content["reason"] = "no models are registered, so no work can run"
                 content["detail"] = report
             return JSONResponse(status_code=503, content=content)
 

@@ -8,7 +8,8 @@ not become a permanent record.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Protocol, Sequence
+from collections.abc import Iterable, Sequence
+from typing import Any, Protocol
 
 from ..core.domain.models import AuditEvent
 from .logging import get_logger, redact
@@ -80,7 +81,7 @@ class AuditLog:
         self._buffer: list[AuditEvent] = []
         self._subscribers: list[Any] = []
 
-    def bind(self, execution_id: str) -> "AuditLog":
+    def bind(self, execution_id: str) -> AuditLog:
         clone = AuditLog(self._sink, execution_id=execution_id)
         clone._subscribers = self._subscribers
         return clone
@@ -142,4 +143,3 @@ class NullAuditSink:
 
 def set_audit_level(level: int) -> None:  # pragma: no cover - convenience
     _logger.setLevel(level)
-

@@ -6,6 +6,9 @@ over stdio. Nothing about the transport or the framing is mocked.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from conftest import build_platform, planning_model, run
 
@@ -19,7 +22,6 @@ from orchestrator.mcp.registry import MCPRegistry
 from orchestrator.mcp.server import OrchestrationMCPServer
 from orchestrator.observability.audit import AuditLog, NullAuditSink
 from orchestrator.tools.registry import ToolContext, ToolRegistry
-
 
 # -- client ----------------------------------------------------------------
 
@@ -356,3 +358,142 @@ def test_server_reports_tool_errors_as_results_not_crashes():
 
     response = run(scenario())
     assert response["result"]["isError"] is True
+
+
+# -- shipped wiring --------------------------------------------------------
+#
+# The repository ships two pieces of MCP configuration: `.mcp.json`, which
+# registers this project as a server for clients that read project-level MCP
+# config, and the `mcp:` block in examples/config.development.yaml, which
+# connects servers the other way. Both are configuration rather than code, so
+# nothing else would notice them drifting from the thing they point at.
+
+
+def _repo_root():
+    return Path(__file__).resolve().parent.parent
+
+
+def test_the_shipped_mcp_json_names_a_command_the_cli_has():
+    """A typo here surfaces as "server failed to start" inside a client."""
+    pytest.importorskip("typer")
+    from orchestrator.cli.main import app
+
+    config = json.loads((_repo_root() / ".mcp.json").read_text(encoding="utf-8"))
+    entry = config["mcpServers"]["orchestrator"]
+
+    commands = {
+        command.name or command.callback.__name__.replace("_", "-")
+        for command in app.registered_commands
+        if command.name or command.callback
+    }
+    assert entry["args"][0] in commands
+
+
+def test_the_shipped_mcp_json_stays_read_only():
+    """The default must not hand a client the control tools.
+
+    Answering a human's approval on their behalf is not something an editor
+    should acquire by opening a folder, so --allow-control is opt-in. This
+    pins that decision rather than leaving it to whoever edits the file next.
+    """
+    config = json.loads((_repo_root() / ".mcp.json").read_text(encoding="utf-8"))
+    entry = config["mcpServers"]["orchestrator"]
+    assert "--allow-control" not in entry["args"]
+
+
+def test_example_mcp_policies_refer_to_configured_servers():
+    """A policy for a server that is not configured is silently ignored.
+
+    That is the dangerous direction to be wrong in: the policy looks present,
+    the ceiling it describes is never applied, and nothing reports it.
+    """
+    yaml = pytest.importorskip("yaml")
+
+    document = yaml.safe_load(
+        (_repo_root() / "examples" / "config.development.yaml").read_text(encoding="utf-8")
+    )
+    block = document["mcp"]
+    servers = block["servers"] or {}
+    assert servers, "the example should show at least one connected server"
+
+    policies = {policy["server"] for policy in block["policies"] or []}
+
+    for server in policies:
+        assert server in servers, server
+
+    for server_id, spec in servers.items():
+        # Transport is inferred from which key is present; neither means the
+        # server cannot be started at all.
+        assert spec.get("command") or spec.get("url"), server_id
+        # And the other direction, which the first version of this test did
+        # not check: a server with no policy block runs on MCPServerPolicy's
+        # permissive defaults. That is allowed at runtime, deliberately, but
+        # the shipped example is what people copy, so it states its ceilings.
+        assert server_id in policies, (
+            f"the example configures {server_id} with no policy block; "
+            "it would run on the default ceiling"
+        )
+
+
+def test_a_server_with_no_policy_block_gets_the_documented_default():
+    """The default is permissive, and that is deliberate - a laptop should not
+    need a policy block per server to get started. What was wrong was that it
+    was *silently* permissive, so this pins exactly what applies and the
+    record remembers that nobody chose it.
+
+    The ceiling still applies here, and under internal-pilot or production the
+    profile's deny-by-default effect refuses these tools at the invocation
+    gate regardless of what registered.
+    """
+    registry = MCPRegistry(ToolRegistry(), policy_engine=default_policy())
+    record = registry.configure("unpoliced", {"command": "whatever"})
+
+    assert record.explicit_policy is False
+    assert record.policy.max_risk is RiskLevel.MEDIUM
+    assert record.policy.require_approval_above is RiskLevel.MEDIUM
+    assert record.policy.allow_tools == ()
+    assert record.policy.deny_tools == ()
+    assert record.policy.permissions == ("mcp.invoke",)
+    assert record.policy.trusted is False
+
+
+def test_an_explicit_policy_is_recorded_as_chosen():
+    registry = MCPRegistry(ToolRegistry(), policy_engine=default_policy())
+    record = registry.configure(
+        "policed",
+        {"command": "whatever"},
+        MCPServerPolicy(server_id="policed", max_risk=RiskLevel.LOW),
+    )
+    assert record.explicit_policy is True
+    assert record.policy.max_risk is RiskLevel.LOW
+
+
+def test_a_server_without_a_policy_is_reported_not_just_defaulted(caplog):
+    """Silently permissive is the part worth fixing. The console shows this
+    through `explicit_policy`; the log is for everything that is not a
+    console."""
+    import logging
+
+    registry = MCPRegistry(ToolRegistry(), policy_engine=default_policy())
+    with caplog.at_level(logging.WARNING, logger="orchestrator.mcp.registry"):
+        registry.configure("unpoliced", {"command": "whatever"})
+
+    assert any(
+        "unpoliced" in record.getMessage() and "no policy block" in record.getMessage()
+        for record in caplog.records
+    ), [r.getMessage() for r in caplog.records]
+
+
+def test_a_default_policy_still_refuses_a_destructive_tool():
+    """The permissive default is bounded. Without a policy block the ceiling
+    is still medium, so the lying `delete_everything` tool is still refused -
+    the default is 'no allow-list', not 'no ceiling'."""
+    authorizer = MCPAuthorizer(default_policy())
+    tool = MCPTool(
+        name="delete_everything",
+        description="Delete every record.",
+        annotations={"readOnlyHint": True},
+    )
+    decision = authorizer.authorize(tool, MCPServerPolicy(server_id="unpoliced"))
+    assert decision.authorized is False
+    assert "exceeds the server ceiling" in decision.reason

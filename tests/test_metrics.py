@@ -21,7 +21,6 @@ from orchestrator.observability.metrics import (
     UnsafeLabel,
 )
 
-
 # --------------------------------------------------------------------------
 # Cardinality and exposure
 # --------------------------------------------------------------------------
@@ -34,14 +33,17 @@ def test_an_objective_can_never_become_a_label():
         metrics.counter("x", objective="Read every customer record and summarise")
 
 
-@pytest.mark.parametrize("value", [
-    "an objective with spaces",
-    "exe_0mszxbhum250hv9agvj but with a very long tail " * 4,
-    "user@example.com",
-    "a\nnewline",
-    'a "quote"',
-    "{injected}",
-])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "an objective with spaces",
+        "exe_0mszxbhum250hv9agvj but with a very long tail " * 4,
+        "user@example.com",
+        "a\nnewline",
+        'a "quote"',
+        "{injected}",
+    ],
+)
 def test_unbounded_or_unsafe_label_values_are_refused(value):
     metrics = Metrics()
     with pytest.raises(UnsafeLabel):
@@ -51,9 +53,9 @@ def test_unbounded_or_unsafe_label_values_are_refused(value):
 def test_a_value_outside_a_closed_set_is_refused():
     """A typo must fail loudly, not create a second series nobody notices."""
     metrics = Metrics()
-    metrics.counter("x", status="completed")          # fine
+    metrics.counter("x", status="completed")  # fine
     with pytest.raises(UnsafeLabel):
-        metrics.counter("x", status="complete")        # typo
+        metrics.counter("x", status="complete")  # typo
     with pytest.raises(UnsafeLabel):
         metrics.counter("x", outcome="mostly_fine")
 
@@ -101,9 +103,17 @@ def test_execution_outcomes_are_counted_by_status_and_confidence():
     metrics.execution_finished("failed", "failed", 5)
 
     rendered = metrics.render()
-    assert 'orchestrator_executions_total{confidence="confirmed",status="completed"} 1' in rendered
-    assert 'orchestrator_executions_total{confidence="uncertain",status="completed"} 1' in rendered
-    assert 'orchestrator_executions_total{confidence="failed",status="failed"} 1' in rendered
+    assert (
+        'orchestrator_executions_total{confidence="confirmed",status="completed"} 1'
+        in rendered
+    )
+    assert (
+        'orchestrator_executions_total{confidence="uncertain",status="completed"} 1'
+        in rendered
+    )
+    assert (
+        'orchestrator_executions_total{confidence="failed",status="failed"} 1' in rendered
+    )
 
 
 def test_a_histogram_renders_cumulative_buckets_sum_and_count():
@@ -116,7 +126,7 @@ def test_a_histogram_renders_cumulative_buckets_sum_and_count():
     assert "orchestrator_test_seconds_sum" in rendered
     assert 'le="+Inf"' in rendered
     # Cumulative: the +Inf bucket holds everything.
-    inf_line = [l for l in rendered.splitlines() if 'le="+Inf"' in l][0]
+    inf_line = [line for line in rendered.splitlines() if 'le="+Inf"' in line][0]
     assert inf_line.strip().endswith(" 4")
 
 

@@ -9,8 +9,9 @@ receives a ``ModelResponse``. Adding a provider means implementing one class
 from __future__ import annotations
 
 import abc
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Sequence
+from typing import Any
 
 from ..core.domain.enums import ModelCapability
 from ..core.domain.models import ModelSpec, Usage
@@ -104,9 +105,7 @@ class LLMProvider(abc.ABC):
     name: str = "provider"
 
     @abc.abstractmethod
-    async def generate(
-        self, request: CompletionRequest, model: ModelSpec
-    ) -> ModelResponse:
+    async def generate(self, request: CompletionRequest, model: ModelSpec) -> ModelResponse:
         """Produce a completion. Raise ``ModelError`` subclasses on failure."""
 
     @abc.abstractmethod

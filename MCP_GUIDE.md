@@ -50,6 +50,13 @@ mcp:
 
 `transport` is inferred: `command` means stdio, `url` means streamable HTTP.
 
+`command` is written the way you would type it — `npx`, `uvx`, `python` — on
+every platform. The transport resolves it with `shutil.which` before spawning,
+so the Windows `.cmd` and `.exe` shims are found without the configuration
+naming them. Absolute paths are passed through unchanged. A command that is on
+no PATH is refused before a process is started, with the name you configured in
+the error rather than a bare "file not found".
+
 ```bash
 orchestrator mcp
 ```
@@ -165,7 +172,9 @@ operations are gated because answering an approval on a human's behalf is
 exactly the kind of administrative action that should require an explicit
 decision to expose.
 
-Register it with an MCP client the usual way:
+Register it with an MCP client the usual way. [`.mcp.json`](.mcp.json) in the
+repository root already does this, so a client that reads project-level MCP
+configuration — Claude Code among them — finds the server without further setup:
 
 ```json
 {
@@ -177,6 +186,33 @@ Register it with an MCP client the usual way:
   }
 }
 ```
+
+The client launches that command with whatever environment it inherits, so the
+project has to be installed and on the path, with the virtualenv active:
+
+```bash
+pip install -e ".[cli,yaml]"
+```
+
+`yaml` is not optional for this. `mcp-serve` builds the platform, and building
+it reads the workflow definitions that ship with the repository — those are
+YAML, so without PyYAML the server exits before it speaks a word, reporting a
+missing dependency for a subsystem you were not thinking about.
+
+| You want | Install |
+|---|---|
+| `orchestrator mcp-serve`, and the CLI generally | `".[cli,yaml]"` |
+| the REST API and web console (`orchestrator serve`) | add `api` |
+| MCP servers reached over HTTP rather than stdio | add `http` |
+| PostgreSQL instead of SQLite | add `postgres` |
+| running the test suite | add `dev` |
+
+An editor started outside that environment will report the server as failed to
+start, and that is why.
+
+To expose the control tools as well, add `"--allow-control"` to `args`. It is
+left off by default: answering a human's approval on their behalf is not
+something a client should acquire by opening a folder.
 
 ---
 

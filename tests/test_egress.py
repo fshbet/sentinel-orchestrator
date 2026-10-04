@@ -220,8 +220,9 @@ def test_only_configured_methods_are_permitted():
 
 def test_reads_and_writes_require_different_permissions():
     """A tool that can POST is not a tool that can only fetch."""
-    policy = _policy(allowed_methods=("GET", "HEAD", "OPTIONS", "POST", "PUT",
-                                      "PATCH", "DELETE"))
+    policy = _policy(
+        allowed_methods=("GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE")
+    )
     for method in ("GET", "HEAD", "OPTIONS"):
         assert policy.check_method(method) == "network.read"
     for method in ("POST", "PUT", "PATCH", "DELETE"):
@@ -245,7 +246,9 @@ def test_a_method_outside_the_known_set_is_never_treated_as_a_read():
 def test_the_default_method_set_is_read_only():
     """Enabling HTTP tools must not silently grant the ability to write."""
     assert set(EgressPolicy(allowed_hosts=("x.test",)).allowed_methods) == {
-        "GET", "HEAD", "OPTIONS"
+        "GET",
+        "HEAD",
+        "OPTIONS",
     }
 
 
@@ -275,9 +278,7 @@ def test_a_redirect_off_the_allowlist_is_refused(monkeypatch):
 
     monkeypatch.setattr(egress, "_resolve_host", lambda host, port: ("93.184.216.34",))
     with pytest.raises(PermissionDenied):
-        egress.validate_redirect(
-            "https://example.com/a", "https://evil.test/b", _policy()
-        )
+        egress.validate_redirect("https://example.com/a", "https://evil.test/b", _policy())
 
 
 def test_a_redirect_within_the_allowlist_is_permitted(monkeypatch):
@@ -294,9 +295,7 @@ def test_a_relative_redirect_resolves_against_the_current_url(monkeypatch):
     from orchestrator.tools import egress
 
     monkeypatch.setattr(egress, "_resolve_host", lambda host, port: ("93.184.216.34",))
-    target = egress.validate_redirect(
-        "https://example.com/a/b", "/c", _policy()
-    )
+    target = egress.validate_redirect("https://example.com/a/b", "/c", _policy())
     assert target.url == "https://example.com/c"
 
 
@@ -306,9 +305,7 @@ def test_a_redirect_from_https_down_to_http_is_refused_under_a_strict_policy(mon
     monkeypatch.setattr(egress, "_resolve_host", lambda host, port: ("93.184.216.34",))
     strict = EgressPolicy(allowed_hosts=("example.com",))  # allow_http False
     with pytest.raises(PermissionDenied):
-        egress.validate_redirect(
-            "https://example.com/a", "http://example.com/b", strict
-        )
+        egress.validate_redirect("https://example.com/a", "http://example.com/b", strict)
 
 
 # --------------------------------------------------------------------------
@@ -354,3 +351,67 @@ def test_a_url_with_no_host_is_refused():
     for url in ("https:///path", "not-a-url", ""):
         with pytest.raises(PermissionDenied):
             validate_url(url, _policy())
+
+
+# --------------------------------------------------------------------------
+# Cloud metadata is blocked by name as well as by address
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "hostname",
+    ["metadata.google.internal", "metadata.goog", "instance-data"],
+)
+def test_a_metadata_hostname_is_refused_even_when_dns_points_elsewhere(
+    monkeypatch, hostname
+):
+    """The hostname rule has to stand on its own.
+
+    The IP rule already refuses 169.254.169.254, and because these names
+    normally resolve there, a test that lets resolution happen proves only
+    that the IP rule works - emptying the hostname list would not fail it.
+    So resolution is pinned to an ordinary public address here. What refuses
+    this can then only be the name.
+
+    That rule is the defence when DNS does not cooperate: split-horizon
+    answers, a custom resolver, or a rebinding attacker who controls what the
+    name resolves to.
+    """
+    from orchestrator.tools import egress
+
+    monkeypatch.setattr(egress, "_resolve_host", lambda host, port: ("93.184.216.34",))
+
+    # Allow-listed on purpose: an operator who has put a metadata name in
+    # their allowlist should still be refused, and told why.
+    policy = _policy(allowed_hosts=(hostname,))
+
+    with pytest.raises(PermissionDenied) as caught:
+        resolve_and_validate(f"http://{hostname}/computeMetadata/v1/", policy)
+
+    assert caught.value.details.get("category") == "cloud_metadata"
+    assert hostname in str(caught.value)
+
+
+def test_the_metadata_hostname_rule_survives_a_resolver_that_lies(monkeypatch):
+    """Belt and braces: resolution is made to look entirely benign, including
+    the port, so nothing downstream of the name check can be the thing that
+    refuses the request."""
+    from orchestrator.tools import egress
+
+    calls: list[tuple[str, int]] = []
+
+    def resolver(host, port):
+        calls.append((host, port))
+        return ("93.184.216.34",)
+
+    monkeypatch.setattr(egress, "_resolve_host", resolver)
+
+    with pytest.raises(PermissionDenied) as caught:
+        resolve_and_validate(
+            "https://metadata.google.internal/latest/meta-data/",
+            _policy(allowed_hosts=("metadata.google.internal",), allow_http=False),
+        )
+
+    assert caught.value.details.get("category") == "cloud_metadata"
+    # Refused on the name, before anything was resolved at all.
+    assert calls == []

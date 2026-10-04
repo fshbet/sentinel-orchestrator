@@ -12,10 +12,15 @@ Path traversal out of the workspace is rejected before anything is opened.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import logging
 import os
+import re
 import shlex
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Sequence
+from typing import TYPE_CHECKING, Any
 
 from ..core.domain.enums import ArtifactType, RiskLevel, ToolSource
 from ..core.domain.models import Artifact, ToolSpec
@@ -27,13 +32,19 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle avoided at runtime
     from .egress import EgressPolicy
     from .execpolicy import ExecPolicy
 
+_log = logging.getLogger("orchestrator.tools.native")
+
 ToolEntry = tuple[ToolSpec, ToolHandler]
 
 
 def _resolve_within(root: Path, candidate: str) -> Path:
     """Resolve ``candidate`` and refuse anything outside ``root``."""
     base = root.resolve()
-    target = (base / candidate).resolve() if not os.path.isabs(candidate) else Path(candidate).resolve()
+    target = (
+        (base / candidate).resolve()
+        if not os.path.isabs(candidate)
+        else Path(candidate).resolve()
+    )
     try:
         target.relative_to(base)
     except ValueError as exc:
@@ -47,6 +58,177 @@ def _resolve_within(root: Path, candidate: str) -> Path:
 
 def _workspace(context: ToolContext, fallback: Path) -> Path:
     return Path(context.workspace) if context.workspace else fallback
+
+
+# The model chooses the artifact's name, so it is untrusted input used as a
+# filename. Directory separators, parent traversal, drive letters, and the
+# Windows reserved device names are all removed rather than escaped: a name is
+# a label here, never a path.
+_UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
+_RESERVED = frozenset(
+    {
+        "con",
+        "prn",
+        "aux",
+        "nul",
+        *(f"com{i}" for i in range(1, 10)),
+        *(f"lpt{i}" for i in range(1, 10)),
+    }
+)
+
+
+def safe_artifact_filename(name: str) -> str:
+    """Turn an agent-chosen artifact name into one safe filename component."""
+    cleaned = _UNSAFE_NAME.sub("_", (name or "").strip()).strip("._-")
+    if not cleaned:
+        cleaned = "artifact"
+    stem = cleaned.split(".", 1)[0].lower()
+    if stem in _RESERVED:
+        cleaned = f"_{cleaned}"
+    return cleaned[:120]
+
+
+class ArtifactPersistenceError(ToolError):
+    """The artifact could not be stored durably.
+
+    Raised rather than logged. A publication that did not persist must not be
+    reported as a publication: in the production deployment the root
+    filesystem is read-only, the fallback artifact path was unwritable, and
+    swallowing the error let executions complete successfully while the file
+    the user asked for existed nowhere.
+    """
+
+
+def _artifact_bytes(content: Any) -> bytes:
+    """The exact bytes to store, for both writing and checksumming."""
+    text = (
+        content if isinstance(content, str) else json.dumps(content, indent=2, default=str)
+    )
+    return text.encode("utf-8")
+
+
+def _unique_target(directory: Path, filename: str, payload: bytes) -> Path:
+    """Resolve a collision without ever overwriting different content.
+
+    Three cases, and the middle one is the important one:
+
+    * nothing there -> use the name;
+    * the same bytes are already there -> reuse it, so a retried task that
+      republishes an identical file does not litter the directory with copies;
+    * different bytes -> add a version suffix, because the earlier file is
+      somebody's output too and silently replacing it loses it.
+    """
+    target = directory / filename
+    if not target.exists():
+        return target
+    try:
+        if target.read_bytes() == payload:
+            return target
+    except OSError:
+        pass
+
+    stem, dot, suffix = filename.partition(".")
+    for version in range(2, 1000):
+        candidate = directory / f"{stem}-{version}{dot}{suffix}"
+        if not candidate.exists():
+            return candidate
+        try:
+            if candidate.read_bytes() == payload:
+                return candidate
+        except OSError:
+            continue
+    raise ArtifactPersistenceError(
+        "too many versions of this artifact name already exist",
+        artifact_name=filename,
+    )
+
+
+def _persist_artifact(artifact: Any, context: ToolContext) -> Path | None:
+    """Write an artifact's content to the run's artifact directory.
+
+    Returns the path written, or None when there is nothing to write - either a
+    reference-only artifact carrying no content, or an embedder that has not
+    configured a store at all.
+
+    When a store *is* configured and there *is* content, failing to write is
+    fatal to the tool call. See ArtifactPersistenceError.
+    """
+    content = artifact.content
+    if content is None or content == "":
+        return None
+
+    root = (context.metadata or {}).get("artifact_dir")
+    if not root:
+        return None
+
+    payload = _artifact_bytes(content)
+    directory = Path(root) / (context.execution_id or "unattached")
+
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        filename = safe_artifact_filename(artifact.name)
+
+        # Refused here, before _unique_target, and not only afterwards.
+        # _unique_target treats an existing file whose bytes differ as a
+        # collision and picks a versioned name, which steps around a planted
+        # link instead of reporting it. The write does stay inside the store,
+        # so nothing escapes - but the call is reported as successful while
+        # the name the agent published still points somewhere else, and the
+        # next reader of `out.html` follows the link. A refusal is the only
+        # honest answer, so it has to come before the collision logic.
+        if (directory / filename).is_symlink():
+            raise ArtifactPersistenceError(
+                "artifact path is a symbolic link and was not written",
+                artifact_name=artifact.name,
+            )
+
+        target = _unique_target(directory, filename, payload)
+
+        # Defence in depth. safe_artifact_filename already reduces the name to
+        # a single component, but the check is cheap and the consequence of a
+        # gap is a write outside the artifact root.
+        resolved_root = directory.resolve()
+        resolved_target = target.resolve()
+        if resolved_target.parent != resolved_root:
+            raise ArtifactPersistenceError(
+                "artifact name resolved outside its execution directory",
+                artifact_name=artifact.name,
+            )
+        # Never follow a symlink out of the store: an attacker who can create
+        # one inside the volume could otherwise redirect a write anywhere the
+        # process can reach.
+        if target.is_symlink():
+            raise ArtifactPersistenceError(
+                "artifact path is a symbolic link and was not written",
+                artifact_name=artifact.name,
+            )
+
+        target.write_bytes(payload)
+    except ArtifactPersistenceError:
+        raise
+    except OSError as exc:
+        # The message names the errno and the artifact, never the absolute
+        # path: this text reaches the model and the API response, and the
+        # store's location is deployment layout.
+        _log.warning(
+            "could not persist artifact %r under %s",
+            artifact.name,
+            root,
+            exc_info=True,
+        )
+        raise ArtifactPersistenceError(
+            "the artifact store could not be written to, so nothing was "
+            f"published ({exc.__class__.__name__}).",
+            artifact_name=artifact.name,
+            remedy=(
+                "check that storage.artifact_dir points at a writable volume "
+                "in this deployment"
+            ),
+        ) from exc
+
+    artifact.size_bytes = len(payload)
+    artifact.checksum = hashlib.sha256(payload).hexdigest()
+    return target
 
 
 # --------------------------------------------------------------------------
@@ -82,9 +264,53 @@ def bookkeeping_tools(
             media_type=arguments.get("media_type"),
             produced_by=context.task_id,
         )
+
+        # "Durable" has to mean a file someone can open. Storing the content in
+        # a database row and calling it durable is how a run that generated a
+        # complete, working page still left nothing on disk for the person who
+        # asked for it. The write is confined to the orchestrator's own artifact
+        # directory, so publishing a result never needs general filesystem
+        # write access.
+        written = _persist_artifact(artifact, context)
+        if written is not None:
+            artifact.location = str(written)
+
+        # Where the artifact record lands. The runtime puts a list here for the
+        # task it is running, so what the agent publishes ends up on that task's
+        # result; `on_artifact` stays as a seam for embedders who route
+        # artifacts somewhere else entirely.
+        delivered = False
+        sink = (context.metadata or {}).get("artifact_sink")
+        if sink is not None:
+            sink.append(artifact)
+            delivered = True
         if on_artifact is not None:
             on_artifact(artifact, context)
-        return {"artifact_id": artifact.id, "name": artifact.name}
+            delivered = True
+
+        if written is not None:
+            result_extra = {"written_to": str(written)}
+        else:
+            result_extra = {}
+
+        if not delivered:
+            # Previously this returned an artifact_id and called it a success.
+            # Nothing was stored, so every downstream check for the artifact
+            # failed while the agent had been told, thirty-three times, that
+            # its work was safely published. A tool that cannot do the thing
+            # must say so: silent success is the one outcome that leaves both
+            # the model and the operator misinformed.
+            raise ToolError(
+                "artifact was not stored: this execution has no artifact sink, "
+                "so emit_artifact has nowhere to publish to.",
+                artifact_name=name,
+                remedy=(
+                    "pass on_artifact= to bookkeeping_tools, or run the agent "
+                    "through AgentRuntime, which supplies one per task"
+                ),
+            )
+
+        return {"artifact_id": artifact.id, "name": artifact.name, **result_extra}
 
     return [
         (
@@ -142,7 +368,9 @@ def bookkeeping_tools(
 # --------------------------------------------------------------------------
 
 
-def filesystem_tools(root: str | Path = ".", *, allow_write: bool = True) -> list[ToolEntry]:
+def filesystem_tools(
+    root: str | Path = ".", *, allow_write: bool = True
+) -> list[ToolEntry]:
     base = Path(root)
 
     def read_file(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any]:
@@ -249,7 +477,7 @@ def process_tools(
     *,
     allowed_commands: Sequence[str] = (),
     timeout: float = 120.0,
-    policy: "ExecPolicy | None" = None,
+    policy: ExecPolicy | None = None,
 ) -> list[ToolEntry]:
     """Run a subprocess under an explicit execution policy.
 
@@ -328,10 +556,8 @@ def process_tools(
             stdin=asyncio.subprocess.DEVNULL,
         )
         try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(), timeout=limit
-            )
-        except asyncio.TimeoutError:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=limit)
+        except TimeoutError:
             process.kill()
             await process.wait()
             raise ToolError(
@@ -392,7 +618,7 @@ def http_tools(
     *,
     allowed_hosts: Sequence[str] = (),
     timeout: float = 30.0,
-    policy: "EgressPolicy | None" = None,
+    policy: EgressPolicy | None = None,
 ) -> list[ToolEntry]:
     """HTTP tools bound to an explicit egress policy.
 
@@ -473,9 +699,7 @@ def http_tools(
         # Redirects are followed by hand. httpx's follow_redirects resolves and
         # connects to each hop without consulting the policy, which is exactly
         # the bypass this loop exists to prevent.
-        async with httpx.AsyncClient(
-            timeout=timeouts, follow_redirects=False
-        ) as client:
+        async with httpx.AsyncClient(timeout=timeouts, follow_redirects=False) as client:
             for hop in range(policy.max_redirects + 1):
                 request = client.build_request(
                     method,

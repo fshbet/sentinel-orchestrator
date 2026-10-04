@@ -25,7 +25,6 @@ from orchestrator.core.workflow.patterns import (
 )
 from orchestrator.errors import ConfigurationError, InvalidWorkflow, NotFound
 
-
 # -- graph -----------------------------------------------------------------
 
 
@@ -265,9 +264,7 @@ def test_registry_pins_versions_and_refuses_silent_edits():
     registry = WorkflowRegistry()
     first = WorkflowDefinition(id="w", version="1.0.0", steps=(Step("a", "a"),))
     registry.register(first)
-    registry.register(
-        WorkflowDefinition(id="w", version="2.0.0", steps=(Step("b", "b"),))
-    )
+    registry.register(WorkflowDefinition(id="w", version="2.0.0", steps=(Step("b", "b"),)))
 
     assert registry.get("w").version == "2.0.0"  # latest by default
     assert registry.get("w", "1.0.0").steps[0].name == "a"  # pinned still available

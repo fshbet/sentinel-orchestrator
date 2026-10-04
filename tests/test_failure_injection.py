@@ -23,7 +23,6 @@ from orchestrator.core.domain.models import ToolCall, ToolSpec
 from orchestrator.core.policy.engine import PermissionScope, default_policy
 from orchestrator.errors import (
     ContextOverflow,
-    MCPTimeout,
     ModelTimeout,
     ModelUnavailable,
 )
@@ -151,8 +150,8 @@ def test_a_tool_returning_corrupt_data_does_not_crash_the_run():
 
 def test_an_mcp_server_that_dies_mid_session_is_reported():
     import sys
-    import textwrap
     import tempfile
+    import textwrap
     from pathlib import Path
 
     from orchestrator.errors import MCPError
@@ -244,22 +243,22 @@ def test_an_mcp_timeout_cancels_the_request():
 
 
 def test_context_overflow_selects_scope_reduction():
+    from conftest import make_task
+
     from orchestrator.core.domain.models import Failure
     from orchestrator.recovery.classification import classify
     from orchestrator.recovery.strategies import select
-    from conftest import make_task
 
     assert classify(ContextOverflow("too big")) is FailureCategory.CONTEXT
-    choice = select(
-        Failure(category=FailureCategory.CONTEXT), task=make_task("t")
-    )
+    choice = select(Failure(category=FailureCategory.CONTEXT), task=make_task("t"))
     assert choice.strategy.value == "reduce_scope"
 
 
 def test_a_tiny_context_window_still_produces_a_valid_request():
+    from conftest import make_task
+
     from orchestrator.context.manager import ContextManager, ContextRequest
     from orchestrator.core.domain.models import Execution, ModelSpec
-    from conftest import make_task
 
     execution = Execution(objective="o" * 4000)
     task = make_task("t")
@@ -364,9 +363,7 @@ def test_an_interrupted_run_does_not_repeat_completed_work():
             from orchestrator.core.execution.limits import LimitGuard
 
             guard = LimitGuard(execution.limits)
-            first_task = next(
-                t for t in execution.tasks.values() if t.name == "a"
-            )
+            first_task = next(t for t in execution.tasks.values() if t.name == "a")
             await platform.engine._run_task(execution, first_task, guard)
             await platform.state.persist(execution)
             await platform.close()

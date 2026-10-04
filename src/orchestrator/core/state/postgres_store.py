@@ -131,7 +131,9 @@ class PostgresStateStore(StateStore):
     ) -> PostgresStateStore:
         asyncpg = _require_asyncpg()
         pool = await asyncpg.create_pool(
-            dsn, min_size=min_size, max_size=max_size,
+            dsn,
+            min_size=min_size,
+            max_size=max_size,
             command_timeout=command_timeout,
         )
         store = cls(pool)
@@ -191,9 +193,7 @@ class PostgresStateStore(StateStore):
                         )
                     performed.append(migration.name)
             finally:
-                await connection.execute(
-                    "SELECT pg_advisory_unlock($1)", _SCHEMA_LOCK_KEY
-                )
+                await connection.execute("SELECT pg_advisory_unlock($1)", _SCHEMA_LOCK_KEY)
 
         return {
             "applied": performed,
@@ -247,9 +247,7 @@ class PostgresStateStore(StateStore):
         affected means either the row is gone or somebody else got there
         first, and the follow-up query distinguishes them.
         """
-        expected = (
-            execution.revision if expected_revision is None else expected_revision
-        )
+        expected = execution.revision if expected_revision is None else expected_revision
         execution.revision = expected + 1
         execution.updated_at = datetime.now(UTC)
         document = json.dumps(execution.to_dict(), default=str)

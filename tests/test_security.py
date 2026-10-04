@@ -28,7 +28,6 @@ from orchestrator.tools import permissions as perms
 from orchestrator.tools.native import bookkeeping_tools, filesystem_tools, process_tools
 from orchestrator.tools.registry import ToolContext, ToolRegistry
 
-
 # -- risk ------------------------------------------------------------------
 
 
@@ -122,12 +121,8 @@ def test_wildcard_permission_grants_are_honoured():
 
 
 def test_explicit_grant_mode_denies_ungranted_tools():
-    engine = PolicyEngine(
-        config=PolicyConfig(require_explicit_tool_grant=True)
-    )
-    assert not engine.evaluate(
-        OperationDescriptor(name="anything"), kind="tool"
-    ).allowed
+    engine = PolicyEngine(config=PolicyConfig(require_explicit_tool_grant=True))
+    assert not engine.evaluate(OperationDescriptor(name="anything"), kind="tool").allowed
 
 
 def test_permission_scope_narrows_to_what_was_granted():

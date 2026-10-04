@@ -10,12 +10,12 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from ...core.domain.enums import ModelCapability
 from ...core.domain.models import ModelSpec, Usage
 from ...errors import ModelError, ModelTimeout, ModelUnavailable
-from ..toolnames import build_mapping, rename_tools, restore
 from ..base import (
     CompletionRequest,
     LLMProvider,
@@ -23,6 +23,7 @@ from ..base import (
     ProviderHealth,
     ToolCallRequest,
 )
+from ..toolnames import build_mapping, rename_tools, restore
 
 API_VERSION = "2023-06-01"
 
@@ -119,9 +120,7 @@ class AnthropicProvider(LLMProvider):
             ]
         return payload
 
-    async def generate(
-        self, request: CompletionRequest, model: ModelSpec
-    ) -> ModelResponse:
+    async def generate(self, request: CompletionRequest, model: ModelSpec) -> ModelResponse:
         httpx = _require_httpx()
         started = time.monotonic()
         try:
@@ -165,9 +164,7 @@ class AnthropicProvider(LLMProvider):
                 tool_calls.append(
                     ToolCallRequest(
                         id=str(block.get("id", f"call_{len(tool_calls)}")),
-                        name=restore(
-                            block.get("name", ""), build_mapping(request.tools)
-                        ),
+                        name=restore(block.get("name", ""), build_mapping(request.tools)),
                         arguments=block.get("input") or {},
                     )
                 )

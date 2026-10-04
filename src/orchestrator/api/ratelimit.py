@@ -64,7 +64,7 @@ class RateLimiter(Protocol):
 class NullRateLimiter:
     """Allows everything. The default: limiting belongs at the proxy."""
 
-    distributed = True   # nothing to disagree about across processes
+    distributed = True  # nothing to disagree about across processes
 
     def check(self, key: str, limit: RateLimit) -> Decision:
         return Decision(allowed=True, remaining=limit.requests, limit=limit.requests)
@@ -126,8 +126,7 @@ class InMemoryRateLimiter:
 
     def _evict(self, cutoff: float) -> None:
         """Drop keys with no recent activity, then oldest-first if still full."""
-        stale = [key for key, hits in self._hits.items()
-                 if not hits or max(hits) <= cutoff]
+        stale = [key for key, hits in self._hits.items() if not hits or max(hits) <= cutoff]
         for key in stale:
             self._hits.pop(key, None)
         if len(self._hits) >= self._max_keys:
@@ -145,8 +144,11 @@ def limiter_key(principal_id: str, client: str) -> str:
     identity than an address: many callers share an egress IP, and one caller
     can move between them.
     """
-    return f"principal:{principal_id}" if principal_id and principal_id != "local" \
+    return (
+        f"principal:{principal_id}"
+        if principal_id and principal_id != "local"
         else f"client:{client}"
+    )
 
 
 def build(config: dict | None) -> tuple[RateLimiter | None, RateLimit | None]:
@@ -245,13 +247,12 @@ class PostgresRateLimiter:
                 # hashtext gives a stable int4 for the bucket name. A
                 # collision would serialise two unrelated buckets, which
                 # costs a little throughput and breaks nothing.
-                await connection.execute(
-                    "SELECT pg_advisory_xact_lock(hashtext($1))", key
-                )
+                await connection.execute("SELECT pg_advisory_xact_lock(hashtext($1))", key)
                 await connection.execute(
                     "DELETE FROM rate_limit_hits "
                     "WHERE bucket = $1 AND hit_at < now() - $2::interval",
-                    key, window,
+                    key,
+                    window,
                 )
                 row = await connection.fetchrow(
                     "SELECT count(*) AS used, min(hit_at) AS oldest "
@@ -261,8 +262,7 @@ class PostgresRateLimiter:
                 used = int(row["used"] or 0)
                 if used < limit.requests:
                     await connection.execute(
-                        "INSERT INTO rate_limit_hits (bucket, hit_at) "
-                        "VALUES ($1, now())",
+                        "INSERT INTO rate_limit_hits (bucket, hit_at) VALUES ($1, now())",
                         key,
                     )
                     return Decision(
@@ -282,10 +282,11 @@ class PostgresRateLimiter:
             retry_after = max(0.0, limit.window_seconds - elapsed)
 
         return Decision(
-            allowed=False, remaining=0, retry_after=retry_after,
+            allowed=False,
+            remaining=0,
+            retry_after=retry_after,
             limit=limit.requests,
         )
-
 
     def check(self, key: str, limit: RateLimit) -> Decision:
         """Synchronous shim, for callers that cannot await.

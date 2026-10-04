@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from ...core.domain.enums import ModelCapability
 from ...core.domain.models import ModelSpec, Usage
 from ...errors import ModelError, ModelTimeout, ModelUnavailable
-from ..toolcalls import recover
 from ..base import (
     CompletionRequest,
     LLMProvider,
@@ -23,6 +23,7 @@ from ..base import (
     ProviderHealth,
     ToolCallRequest,
 )
+from ..toolcalls import recover
 
 
 def _require_httpx():
@@ -108,9 +109,7 @@ class OllamaProvider(LLMProvider):
         self._models.extend(s for s in discovered if s.model not in known)
         return discovered
 
-    async def generate(
-        self, request: CompletionRequest, model: ModelSpec
-    ) -> ModelResponse:
+    async def generate(self, request: CompletionRequest, model: ModelSpec) -> ModelResponse:
         httpx = _require_httpx()
         messages: list[dict[str, Any]] = []
         if request.system:
@@ -177,10 +176,10 @@ class OllamaProvider(LLMProvider):
             )
 
         data = response.json()
-        message = data.get("message") or {}
-        text = message.get("content") or ""
-        tool_calls = []
-        for index, raw in enumerate(message.get("tool_calls") or []):
+        reply = data.get("message") or {}
+        text = reply.get("content") or ""
+        tool_calls: list[ToolCallRequest] = []
+        for index, raw in enumerate(reply.get("tool_calls") or []):
             function = raw.get("function") or {}
             arguments = function.get("arguments")
             if isinstance(arguments, str):
@@ -259,8 +258,7 @@ class OllamaProvider(LLMProvider):
                 provider=self.name,
                 available=True,
                 models=[
-                    str(m.get("model") or m.get("name"))
-                    for m in payload.get("models", [])
+                    str(m.get("model") or m.get("name")) for m in payload.get("models", [])
                 ],
                 latency_ms=latency,
                 detail={"base_url": self.base_url},

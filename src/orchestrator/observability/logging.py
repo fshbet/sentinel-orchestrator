@@ -62,7 +62,7 @@ REDACTED = "[redacted]"
 # at which point it protects nothing. Missing an unrecognised format is the
 # better failure: key-based redaction still covers the fields where secrets
 # are normally carried.
-VALUE_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+VALUE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # Specific vendor prefixes first: they share the sk- stem, and the
     # first match wins. The value is redacted either way, but the label is
     # what tells an operator which credential to rotate.
@@ -79,10 +79,13 @@ VALUE_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
     # Structural rather than vendor-specific.
     ("bearer", re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{16,}=*")),
     ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}")),
-    ("private_key", re.compile(
-        r"-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----"
-        r"[\s\S]*?-----END (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----"
-    )),
+    (
+        "private_key",
+        re.compile(
+            r"-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----"
+            r"[\s\S]*?-----END (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----"
+        ),
+    ),
     ("url_credentials", re.compile(r"(?<=://)[^/\s:@]+:[^/\s@]+(?=@)")),
 )
 
@@ -98,6 +101,7 @@ def redact_text(text: str) -> str:
     for label, pattern in VALUE_PATTERNS:
         text = pattern.sub(f"[redacted:{label}]", text)
     return text
+
 
 _WORD_SPLIT = re.compile(r"[^a-z0-9]+")
 

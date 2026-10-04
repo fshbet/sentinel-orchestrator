@@ -11,17 +11,26 @@ Nothing in the orchestration core imports this module.
 from __future__ import annotations
 
 import asyncio
+
+# `builtins` is imported because the registries below expose a public
+# `list()` method, which shadows the builtin inside their own class body.
+# `-> builtins.list[X]` is the annotation that keeps the method name.
+import builtins
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 from ..core.domain.enums import RiskLevel, ToolSource
 from ..core.domain.models import ToolSpec
 from ..core.policy.engine import PolicyEngine
 from ..errors import MCPError, NotFound, ToolError
 from ..observability.audit import AuditLog, EventType
+from ..observability.logging import get_logger
 from ..tools.registry import ToolContext, ToolRegistry
 from .client import MCPClient, MCPTool
 from .policy import MCPAuthorizer, MCPServerPolicy, ToolAuthorization
+
+_log = get_logger("mcp.registry")
 
 # Tool ids are namespaced so two servers offering "search" do not collide.
 TOOL_ID_TEMPLATE = "mcp.{server}.{tool}"
@@ -37,6 +46,12 @@ class ServerRecord:
     authorizations: list[ToolAuthorization] = field(default_factory=list)
     registered_tool_ids: list[str] = field(default_factory=list)
     error: str | None = None
+    # What the server said on its way down, when it failed to start. The
+    # transport that captured it is closed and dropped on failure, so this is
+    # the only place it survives.
+    stderr_tail: list[str] = field(default_factory=list)
+    # False when no policy block named this server and the defaults applied.
+    explicit_policy: bool = True
 
     @property
     def connected(self) -> bool:
@@ -51,10 +66,10 @@ class ServerRecord:
             "protocol_version": self.client.protocol_version if self.client else None,
             "tools_offered": [t.name for t in self.tools],
             "tools_registered": list(self.registered_tool_ids),
-            "tools_denied": [
-                a.to_dict() for a in self.authorizations if not a.authorized
-            ],
+            "tools_denied": [a.to_dict() for a in self.authorizations if not a.authorized],
             "error": self.error,
+            "stderr_tail": list(self.stderr_tail),
+            "explicit_policy": self.explicit_policy,
         }
 
 
@@ -78,16 +93,36 @@ class MCPRegistry:
     def configure(
         self, server_id: str, config: dict[str, Any], policy: MCPServerPolicy | None = None
     ) -> ServerRecord:
+        # A server with no policy entry gets MCPServerPolicy's defaults: no
+        # name restrictions and a medium risk ceiling. That is deliberate -
+        # a development machine should not need a policy block per server to
+        # get started - but it is permissive, and silently permissive is the
+        # part worth fixing. The record remembers that the policy was implied
+        # rather than written, `orchestrator mcp` shows it, and this logs it.
+        #
+        # The ceiling still applies, and in internal-pilot and production the
+        # profile's deny-by-default policy effect refuses these tools at the
+        # invocation gate regardless of what registered here.
+        if policy is None:
+            _log.warning(
+                "MCP server %s has no policy block; applying the default"
+                " ceiling (max_risk=%s, no allow-list)",
+                server_id,
+                MCPServerPolicy(server_id=server_id).max_risk.value,
+            )
         record = ServerRecord(
             server_id=server_id,
             config=dict(config),
             policy=policy or MCPServerPolicy(server_id=server_id),
+            explicit_policy=policy is not None,
         )
         self._servers[server_id] = record
         return record
 
     def configure_many(
-        self, servers: dict[str, dict[str, Any]], policies: dict[str, MCPServerPolicy] | None = None
+        self,
+        servers: dict[str, dict[str, Any]],
+        policies: dict[str, MCPServerPolicy] | None = None,
     ) -> list[ServerRecord]:
         policies = policies or {}
         return [
@@ -99,7 +134,9 @@ class MCPRegistry:
         try:
             return self._servers[server_id]
         except KeyError as exc:
-            raise NotFound(f"MCP server {server_id} is not configured", id=server_id) from exc
+            raise NotFound(
+                f"MCP server {server_id} is not configured", id=server_id
+            ) from exc
 
     def list(self) -> list[ServerRecord]:
         return sorted(self._servers.values(), key=lambda r: r.server_id)
@@ -116,6 +153,12 @@ class MCPRegistry:
             record.error = None
         except Exception as exc:  # noqa: BLE001 - a bad server must not kill the run
             record.error = str(exc)
+            # MCPClient.connect attaches the child's stderr tail before closing
+            # the transport. Keeping it on the record is what lets
+            # `orchestrator mcp` show why the server would not start.
+            details = getattr(exc, "details", None)
+            if isinstance(details, dict):
+                record.stderr_tail = [str(line) for line in details.get("stderr_tail", [])]
             self._audit(
                 EventType.MCP_ERROR, server=server_id, phase="connect", error=str(exc)
             )
@@ -131,7 +174,7 @@ class MCPRegistry:
         await self.refresh(server_id)
         return record
 
-    async def connect_all(self) -> list[ServerRecord]:
+    async def connect_all(self) -> builtins.list[ServerRecord]:
         await asyncio.gather(
             *(self.connect(server_id) for server_id in list(self._servers)),
             return_exceptions=True,
@@ -242,7 +285,7 @@ class MCPRegistry:
 
     # -- introspection -----------------------------------------------------
 
-    async def health(self) -> list[dict[str, Any]]:
+    async def health(self) -> builtins.list[dict[str, Any]]:
         reports = []
         for record in self.list():
             if record.client is None:
@@ -251,6 +294,8 @@ class MCPRegistry:
                         "server": record.server_id,
                         "status": "disconnected",
                         "error": record.error,
+                        "stderr_tail": list(record.stderr_tail),
+                        "explicit_policy": record.explicit_policy,
                         "transport": record.config.get("transport")
                         or ("http" if record.config.get("url") else "stdio"),
                     }
@@ -258,16 +303,17 @@ class MCPRegistry:
                 continue
             report = await record.client.health()
             report["tools_registered"] = list(record.registered_tool_ids)
+            report["explicit_policy"] = record.explicit_policy
             report["tools_denied"] = [
                 a.to_dict() for a in record.authorizations if not a.authorized
             ]
             reports.append(report)
         return reports
 
-    def registered_tools(self) -> list[ToolSpec]:
+    def registered_tools(self) -> builtins.list[ToolSpec]:
         return self.tools.list(source=ToolSource.MCP)
 
-    def authorizations(self) -> list[ToolAuthorization]:
+    def authorizations(self) -> builtins.list[ToolAuthorization]:
         return [a for record in self.list() for a in record.authorizations]
 
     def _audit(self, event: str, **payload: Any) -> None:
@@ -288,9 +334,7 @@ def policies_from_config(raw: Iterable[dict[str, Any]]) -> dict[str, MCPServerPo
             deny_tools=tuple(entry.get("deny_tools", ())),
             permissions=tuple(entry.get("permissions", ("mcp.invoke",))),
             max_risk=RiskLevel(entry.get("max_risk", "medium")),
-            require_approval_above=RiskLevel(
-                entry.get("require_approval_above", "medium")
-            ),
+            require_approval_above=RiskLevel(entry.get("require_approval_above", "medium")),
             trusted=bool(entry.get("trusted", False)),
             timeout=float(entry.get("timeout", 60.0)),
         )

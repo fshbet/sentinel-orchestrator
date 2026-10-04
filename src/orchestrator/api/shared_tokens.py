@@ -189,9 +189,17 @@ class PostgresTokenStore:
                 "  not_before = EXCLUDED.not_before, "
                 "  expires_at = EXCLUDED.expires_at "
                 "RETURNING *",
-                token_id, lookup_hash(secret), hash_token(secret, salt), salt,
-                principal_id, scope_list, tenant, description, now,
-                not_before, expires_at,
+                token_id,
+                lookup_hash(secret),
+                hash_token(secret, salt),
+                salt,
+                principal_id,
+                scope_list,
+                tenant,
+                description,
+                now,
+                not_before,
+                expires_at,
             )
 
         record = self._to_record(row)
@@ -213,7 +221,9 @@ class PostgresTokenStore:
                 "UPDATE api_tokens SET revoked_at = now(), revoked_by = $2, "
                 "  revoke_reason = $3 "
                 "WHERE token_id = $1 AND revoked_at IS NULL",
-                token_id, actor or "unknown", reason,
+                token_id,
+                actor or "unknown",
+                reason,
             )
             if result.endswith(" 0"):
                 # Either unknown or already revoked; distinguish them so a
@@ -232,10 +242,12 @@ class PostgresTokenStore:
     async def is_revoked(self, token_id: str) -> bool:
         pool = await self._acquire_pool()
         async with pool.acquire() as connection:
-            return bool(await connection.fetchval(
-                "SELECT revoked_at IS NOT NULL FROM api_tokens WHERE token_id = $1",
-                token_id,
-            ))
+            return bool(
+                await connection.fetchval(
+                    "SELECT revoked_at IS NOT NULL FROM api_tokens WHERE token_id = $1",
+                    token_id,
+                )
+            )
 
     # -- resolution --------------------------------------------------------
 
@@ -271,9 +283,7 @@ class PostgresTokenStore:
             raise Unauthorized("credential not recognised")
 
         if row["revoked_at"] is not None:
-            self._record_event(
-                "token.rejected", token_id=record.token_id, reason="revoked"
-            )
+            self._record_event("token.rejected", token_id=record.token_id, reason="revoked")
             raise TokenRevoked(f"token {record.token_id} has been revoked")
 
         try:
@@ -320,11 +330,13 @@ class PostgresTokenStore:
     async def active(self) -> int:
         pool = await self._acquire_pool()
         async with pool.acquire() as connection:
-            return int(await connection.fetchval(
-                "SELECT count(*) FROM api_tokens WHERE revoked_at IS NULL "
-                "AND (expires_at IS NULL OR expires_at > now()) "
-                "AND (not_before IS NULL OR not_before <= now())"
-            ))
+            return int(
+                await connection.fetchval(
+                    "SELECT count(*) FROM api_tokens WHERE revoked_at IS NULL "
+                    "AND (expires_at IS NULL OR expires_at > now()) "
+                    "AND (not_before IS NULL OR not_before <= now())"
+                )
+            )
 
     # -- seeding -----------------------------------------------------------
 
@@ -397,8 +409,14 @@ class SharedIdentityRegistry:
     answers live in the database.
     """
 
-    def __init__(self, store: PostgresTokenStore, *, multi_tenant: bool = False,
-                 token_count: int = 0, seed: dict | None = None) -> None:
+    def __init__(
+        self,
+        store: PostgresTokenStore,
+        *,
+        multi_tenant: bool = False,
+        token_count: int = 0,
+        seed: dict | None = None,
+    ) -> None:
         self._store = store
         self.multi_tenant = multi_tenant
         # The config section to seed from, applied during app startup on the

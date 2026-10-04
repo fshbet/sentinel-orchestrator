@@ -42,6 +42,27 @@ correctness, and never claims to.
 | `Authorization` cannot be set on outbound requests | Complete | `test_adversarial.py` |
 | Socket-level DNS pinning | **Not implemented, and no longer claimed** | The `pin_dns` field and `pinned_transport` reference are removed; `describe()` reports the gap. `deployment/squid.conf` closes it. |
 
+## Artifact persistence
+
+| Item | Status | Evidence |
+|---|---|---|
+| Published content is written to a durable file | Complete | `test_artifact_persistence.py` |
+| `storage.artifact_dir` declared in the production config | Complete | `deployment/config.production.yaml` |
+| Shared volume mounted into both replicas at that path | Complete | `deployment/docker-compose.production.yml`; smoke test §14 |
+| Volume owned by UID 10001 before replicas start | Complete | `artifact-init` service; smoke test §14 |
+| Store is outside the workspace and separate from database state | Complete | `deployment/docker-compose.production.yml` |
+| Failure to persist fails the tool call | Complete | `test_artifact_persistence.py`; smoke test §14 |
+| A failed write can never report a successful publication | Complete | `test_artifact_persistence.py` |
+| SHA-256 and byte size recorded for stored content | Complete | `test_artifact_persistence.py` |
+| `artifact_exists` re-reads the file and checks size and checksum | Complete | `test_artifact_persistence.py` |
+| An in-memory record alone does not satisfy the check | Complete | `test_artifact_persistence.py` |
+| Artifact names confined to their execution directory | Complete | `test_artifact_persistence.py` (8 hostile names) |
+| Symlinks in the store are not followed | Complete | `test_artifact_persistence.py` |
+| Name collision versions rather than overwrites | Complete | `test_artifact_emission.py` |
+| Error text omits the store path | Complete | `test_artifact_persistence.py` |
+| Cross-replica read proven in the production topology | **Unverified here** | Smoke test §14 exists and is syntax-checked; not executed in this environment — see the note below. |
+
+
 ## Policy defaults
 
 | Item | Status | Evidence |
@@ -223,8 +244,8 @@ correctness, and never claims to.
 |---|---|---|
 | CI: tests on 3.11/3.12/3.13, Linux + Windows | Complete | `.github/workflows/ci.yml` |
 | CI: lint and format | Complete | ruff |
-| CI: type check, gating on `typed-modules.txt` (14 modules) | Complete | mypy clean, no `\|\| true` |
-| CI: type check, remainder reported | Complete | 40 errors in legacy modules, tracked below |
+| CI: type check, gating on `typed-modules.txt` (15 modules) | Complete | mypy clean, no `\|\| true` |
+| CI: type check, whole tree, gating | Complete | mypy clean across all 111 modules |
 | CI: dependency vulnerability scan | Complete | pip-audit |
 | CI: secret scanning | Complete | credential-pattern grep |
 | CI: static security analysis | Complete | bandit |
@@ -276,9 +297,7 @@ so nobody has to discover it.
 5. **No transitive lockfile.** Constraints with upper bounds only.
 6. **No real-model evaluation.** The harness is deterministic by design.
 7. **No impact taxonomy distinct from `RiskLevel`.**
-8. **Backup/restore documented but not rehearsed in CI**, and mypy gates only
-   the modules in `typed-modules.txt` — the legacy remainder is reported, not
-   gated.
+8. **Backup/restore documented but not rehearsed in CI.**
 
 ### Explicitly unsupported
 

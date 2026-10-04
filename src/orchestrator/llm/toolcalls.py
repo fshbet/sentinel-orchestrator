@@ -21,7 +21,8 @@ Guessing at ambiguous output would be worse than passing it through.
 from __future__ import annotations
 
 import json
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from .base import ToolCallRequest
 

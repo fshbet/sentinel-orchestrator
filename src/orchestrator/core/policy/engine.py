@@ -12,8 +12,9 @@ the risk engine rates HIGH or above.
 from __future__ import annotations
 
 import fnmatch
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 from ...errors import PermissionDenied
 from ..domain.enums import RiskLevel
@@ -44,11 +45,7 @@ class PolicyRule:
     @property
     def specificity(self) -> int:
         # Longer, less wildcarded patterns win.
-        return (
-            self.priority * 1000
-            + len(self.subject)
-            - self.subject.count("*") * 10
-        )
+        return self.priority * 1000 + len(self.subject) - self.subject.count("*") * 10
 
 
 @dataclass
@@ -105,9 +102,7 @@ class PolicyEngine:
     ) -> None:
         self.config = config or PolicyConfig()
         self.risk = risk_engine or RiskEngine()
-        self._rules: list[PolicyRule] = sorted(
-            rules, key=lambda r: -r.specificity
-        )
+        self._rules: list[PolicyRule] = sorted(rules, key=lambda r: -r.specificity)
 
     # -- rule management ---------------------------------------------------
 
@@ -150,9 +145,7 @@ class PolicyEngine:
             )
 
         # 2. Missing permissions are a denial, not an approval prompt.
-        missing = self._missing_permissions(
-            operation, rule, granted_permissions
-        )
+        missing = self._missing_permissions(operation, rule, granted_permissions)
         if missing:
             return PolicyDecision(
                 allowed=False,
@@ -305,7 +298,7 @@ class PermissionScope:
             return False
         return any(fnmatch.fnmatch(server_id, pattern) for pattern in self.mcp_servers)
 
-    def narrowed_to(self, tools: Iterable[str]) -> "PermissionScope":
+    def narrowed_to(self, tools: Iterable[str]) -> PermissionScope:
         allowed = tuple(t for t in tools if self.allows_tool(t))
         return PermissionScope(
             permissions=self.permissions,

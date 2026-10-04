@@ -10,15 +10,17 @@ adapter is in play. Everything below it depends on interfaces (spec section 47).
 from __future__ import annotations
 
 import asyncio
+import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from .agents.capabilities import CapabilityRegistry
 from .agents.registry import AgentRegistry, agent_from_dict
 from .agents.runtime import GenericAgentRuntime, RuntimeRegistry
 from .agents.selection import AgentSelector, SelectionPolicy
-from .agents.skills import Skill, SkillRegistry, skill_from_dict
+from .agents.skills import SkillRegistry, skill_from_dict
 from .config.loader import Config, load
 from .context.manager import ContextManager
 from .context.memory import MemoryStore
@@ -59,6 +61,8 @@ from .tools.registry import ToolRegistry
 from .validation.gates import GateRunner
 from .validation.validators import ValidatorRegistry
 
+_log = logging.getLogger("orchestrator.platform")
+
 
 @dataclass
 class Orchestrator:
@@ -97,14 +101,23 @@ class Orchestrator:
         connect_mcp: bool = True,
         metrics: Any = None,
         start: str | Path = ".",
-    ) -> "Orchestrator":
-        cfg = config or load(
-            paths=config_paths, overrides=overrides, start=start
-        )
+    ) -> Orchestrator:
+        cfg = config or load(paths=config_paths, overrides=overrides, start=start)
         configure_logging(
             str(cfg.get("logging.level", "warning")),
             json_output=bool(cfg.get("logging.json", True)),
         )
+
+        # Credentials saved through the console live in a file beside the state
+        # database, not in the environment. Load them here rather than in the
+        # API, so the CLI and the API see the same providers - a key saved in
+        # the console that only worked over HTTP would be a trap.
+        try:
+            from .api.settings import load_secrets
+
+            load_secrets(cfg)
+        except Exception:  # noqa: BLE001 - a missing or unreadable file is not fatal
+            _log.debug("no stored credentials loaded", exc_info=True)
 
         workspace_path = str(workspace or cfg.get("workspace", "."))
 
@@ -128,9 +141,7 @@ class Orchestrator:
         workflows = WorkflowRegistry()
         skills = SkillRegistry()
         runtimes = RuntimeRegistry()
-        memory = MemoryStore(
-            max_working=int(cfg.get("context.max_working_memory", 500))
-        )
+        memory = MemoryStore(max_working=int(cfg.get("context.max_working_memory", 500)))
 
         # The data-flow policy lives on the router because that is the one
         # place every request to every provider passes through. Enforcing it
@@ -267,6 +278,7 @@ class Orchestrator:
             metrics=collector,
             config=EngineConfig(
                 workspace=workspace_path,
+                artifact_dir=_artifact_dir(cfg),
                 default_limits=_build_limits(cfg),
                 approval_threshold=RiskLevel(
                     str(cfg.get("policy.approval_threshold", "high"))
@@ -626,12 +638,28 @@ def _model_spec(data: dict[str, Any]) -> ModelSpec:
     )
 
 
+def _artifact_dir(config: Config) -> str:
+    """Where published artifacts are written.
+
+    Beside the state database by default, because that is already the
+    directory holding this deployment's local state and is already excluded
+    from version control. Configurable for anyone who wants results collected
+    somewhere specific.
+    """
+    configured = str(config.get("storage.artifact_dir", "") or "").strip()
+    if configured:
+        return str(Path(configured).expanduser())
+    storage = str(config.get("storage.path", ".orchestrator/state.db"))
+    return str(Path(storage).expanduser().parent / "artifacts")
+
+
 def _register_native_tools(
     config: Config, tools: ToolRegistry, memory: MemoryStore, workspace: str
 ) -> None:
     section = config.section("tools")
 
     if section.get("bookkeeping", {}).get("enabled", True):
+
         def on_note(key: str, value: str, context: Any) -> None:
             memory.remember(
                 key,
@@ -658,8 +686,6 @@ def _register_native_tools(
     http = section.get("http", {})
     if http.get("enabled"):
         tools.register_many(native.http_tools(policy=_egress_policy(http)))
-
-
 
 
 def _exec_policy(process: dict[str, Any], workspace: str):
@@ -712,9 +738,7 @@ def _egress_policy(http: dict[str, Any]):
             remedy="set tools.http.allowed_hosts",
         )
 
-    methods = tuple(
-        str(m).upper() for m in (http.get("allowed_methods") or READ_METHODS)
-    )
+    methods = tuple(str(m).upper() for m in (http.get("allowed_methods") or READ_METHODS))
 
     try:
         return EgressPolicy(

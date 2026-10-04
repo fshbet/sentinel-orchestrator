@@ -108,8 +108,7 @@ class TokenRecord:
         moment = now or datetime.now(UTC)
         if self.not_before and moment + CLOCK_SKEW < self.not_before:
             raise TokenNotYetValid(
-                f"token {self.token_id} is not valid until "
-                f"{self.not_before.isoformat()}"
+                f"token {self.token_id} is not valid until {self.not_before.isoformat()}"
             )
         if self.expires_at and moment - CLOCK_SKEW > self.expires_at:
             raise TokenExpired(
@@ -266,9 +265,7 @@ class TokenStore:
             raise Unauthorized("credential not recognised")
 
         if self.is_revoked(found.token_id):
-            self._record_event(
-                "token.rejected", token_id=found.token_id, reason="revoked"
-            )
+            self._record_event("token.rejected", token_id=found.token_id, reason="revoked")
             raise TokenRevoked(f"token {found.token_id} has been revoked")
 
         try:

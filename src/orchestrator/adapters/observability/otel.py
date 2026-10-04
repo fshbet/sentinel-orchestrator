@@ -62,7 +62,7 @@ class OTelBridge:
         if not self._enabled or self._tracer is None:
             return
         try:
-            attributes = {
+            attributes: dict[str, str | int | float | bool] = {
                 "execution.id": event.execution_id,
                 "event.type": event.type,
             }
@@ -76,7 +76,7 @@ class OTelBridge:
             with self._tracer.start_as_current_span(event.type, attributes=attributes):
                 pass
             self._count(event.type)
-        except Exception:  # noqa: BLE001 - telemetry must never raise
+        except Exception:  # noqa: BLE001, S110 - telemetry must never raise
             pass
 
     def _count(self, name: str) -> None:
@@ -92,7 +92,9 @@ class OTelBridge:
         counter.add(1)
 
 
-def attach_if_available(audit: AuditLog, *, service_name: str = "universal-orchestrator") -> OTelBridge | None:
+def attach_if_available(
+    audit: AuditLog, *, service_name: str = "universal-orchestrator"
+) -> OTelBridge | None:
     bridge = OTelBridge(service_name)
     if not bridge.enabled:
         return None

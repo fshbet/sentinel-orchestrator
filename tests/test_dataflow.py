@@ -25,7 +25,6 @@ from orchestrator.llm.dataflow import (
 )
 from orchestrator.observability.logging import redact, redact_text
 
-
 # --------------------------------------------------------------------------
 # Redaction of values, not just key names
 # --------------------------------------------------------------------------
@@ -124,7 +123,7 @@ def test_an_unknown_classification_ranks_as_most_sensitive():
 
 
 def test_an_undeclared_provider_is_unapproved_not_public():
-    """"We never decided" must not read as "cleared for public data"."""
+    """ "We never decided" must not read as "cleared for public data"."""
     policy = DataFlowPolicy()
     decision = policy.evaluate("some-cloud-provider", PUBLIC)
     assert decision.allowed is False
@@ -133,29 +132,40 @@ def test_an_undeclared_provider_is_unapproved_not_public():
 
 
 def test_a_local_provider_accepts_every_classification():
-    policy = DataFlowPolicy({
-        "ollama": ProviderPolicy("ollama", disposition=LOCAL,
-                                 max_classification=RESTRICTED)
-    })
+    policy = DataFlowPolicy(
+        {
+            "ollama": ProviderPolicy(
+                "ollama", disposition=LOCAL, max_classification=RESTRICTED
+            )
+        }
+    )
     for classification in (PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED):
         assert policy.evaluate("ollama", classification).allowed is True
 
 
 def test_a_prohibited_provider_never_receives_data():
-    policy = DataFlowPolicy({
-        "banned": ProviderPolicy("banned", disposition=PROHIBITED,
-                                 max_classification=RESTRICTED)
-    })
+    policy = DataFlowPolicy(
+        {
+            "banned": ProviderPolicy(
+                "banned", disposition=PROHIBITED, max_classification=RESTRICTED
+            )
+        }
+    )
     for classification in (PUBLIC, RESTRICTED):
         assert policy.evaluate("banned", classification).allowed is False
 
 
 def test_an_approved_provider_is_bounded_by_its_maximum():
-    policy = DataFlowPolicy({
-        "openrouter": ProviderPolicy("openrouter", disposition=APPROVED,
-                                     max_classification=INTERNAL,
-                                     approval_reference="VENDOR-114"),
-    })
+    policy = DataFlowPolicy(
+        {
+            "openrouter": ProviderPolicy(
+                "openrouter",
+                disposition=APPROVED,
+                max_classification=INTERNAL,
+                approval_reference="VENDOR-114",
+            ),
+        }
+    )
     assert policy.evaluate("openrouter", PUBLIC).allowed is True
     assert policy.evaluate("openrouter", INTERNAL).allowed is True
 
@@ -168,11 +178,16 @@ def test_an_approved_provider_is_bounded_by_its_maximum():
 
 def test_the_approval_reference_appears_in_the_reason():
     """The audit trail should say which review cleared this."""
-    policy = DataFlowPolicy({
-        "x": ProviderPolicy("x", disposition=APPROVED,
-                            max_classification=CONFIDENTIAL,
-                            approval_reference="DPA-2026-04"),
-    })
+    policy = DataFlowPolicy(
+        {
+            "x": ProviderPolicy(
+                "x",
+                disposition=APPROVED,
+                max_classification=CONFIDENTIAL,
+                approval_reference="DPA-2026-04",
+            ),
+        }
+    )
     assert "DPA-2026-04" in policy.evaluate("x", CONFIDENTIAL).reason
 
 
@@ -183,16 +198,22 @@ def test_enforce_raises_rather_than_returning_false():
 
 
 def test_a_decision_records_what_happened_without_the_data():
-    policy = DataFlowPolicy({
-        "ollama": ProviderPolicy("ollama", disposition=LOCAL),
-    })
+    policy = DataFlowPolicy(
+        {
+            "ollama": ProviderPolicy("ollama", disposition=LOCAL),
+        }
+    )
     recorded = policy.evaluate("ollama", CONFIDENTIAL).to_dict()
     assert recorded["provider"] == "ollama"
     assert recorded["classification"] == CONFIDENTIAL
     assert recorded["disposition"] == LOCAL
     # The decision, never the payload.
     assert set(recorded) == {
-        "allowed", "reason", "provider", "classification", "disposition"
+        "allowed",
+        "reason",
+        "provider",
+        "classification",
+        "disposition",
     }
 
 
@@ -214,38 +235,54 @@ def _config(document):
 
 def test_ollama_is_recognised_as_local_without_being_declared():
     """The one case where the platform knows more than the config does."""
-    policy = DataFlowPolicy.from_config(_config({
-        "profile": "development",
-        "models": {"providers": [{"type": "ollama", "name": "ollama"}]},
-    }))
+    policy = DataFlowPolicy.from_config(
+        _config(
+            {
+                "profile": "development",
+                "models": {"providers": [{"type": "ollama", "name": "ollama"}]},
+            }
+        )
+    )
     assert policy.evaluate("ollama", RESTRICTED).allowed is True
 
 
 def test_a_remote_provider_without_a_data_policy_is_unapproved():
-    policy = DataFlowPolicy.from_config(_config({
-        "profile": "internal-pilot",
-        "models": {"providers": [
-            {"type": "openai_compatible", "name": "openrouter"}
-        ]},
-    }))
+    policy = DataFlowPolicy.from_config(
+        _config(
+            {
+                "profile": "internal-pilot",
+                "models": {
+                    "providers": [{"type": "openai_compatible", "name": "openrouter"}]
+                },
+            }
+        )
+    )
     decision = policy.evaluate("openrouter", PUBLIC)
     assert decision.allowed is False
     assert decision.disposition == UNAPPROVED
 
 
 def test_a_declared_approval_is_honoured():
-    policy = DataFlowPolicy.from_config(_config({
-        "profile": "internal-pilot",
-        "models": {"providers": [{
-            "type": "openai_compatible",
-            "name": "openrouter",
-            "data_policy": {
-                "disposition": "approved",
-                "max_classification": "internal",
-                "approval_reference": "VENDOR-114",
-            },
-        }]},
-    }))
+    policy = DataFlowPolicy.from_config(
+        _config(
+            {
+                "profile": "internal-pilot",
+                "models": {
+                    "providers": [
+                        {
+                            "type": "openai_compatible",
+                            "name": "openrouter",
+                            "data_policy": {
+                                "disposition": "approved",
+                                "max_classification": "internal",
+                                "approval_reference": "VENDOR-114",
+                            },
+                        }
+                    ]
+                },
+            }
+        )
+    )
     assert policy.evaluate("openrouter", INTERNAL).allowed is True
     assert policy.evaluate("openrouter", CONFIDENTIAL).allowed is False
 
@@ -254,25 +291,45 @@ def test_an_invalid_disposition_is_rejected():
     from orchestrator.errors import ConfigurationError
 
     with pytest.raises(ConfigurationError):
-        DataFlowPolicy.from_config(_config({
-            "profile": "development",
-            "models": {"providers": [{
-                "type": "openai_compatible", "name": "x",
-                "data_policy": {"disposition": "probably-fine"},
-            }]},
-        }))
+        DataFlowPolicy.from_config(
+            _config(
+                {
+                    "profile": "development",
+                    "models": {
+                        "providers": [
+                            {
+                                "type": "openai_compatible",
+                                "name": "x",
+                                "data_policy": {"disposition": "probably-fine"},
+                            }
+                        ]
+                    },
+                }
+            )
+        )
 
 
 def test_the_default_classification_applies_when_none_is_given():
-    policy = DataFlowPolicy.from_config(_config({
-        "profile": "internal-pilot",
-        "data": {"default_classification": "confidential"},
-        "models": {"providers": [{
-            "type": "openai_compatible", "name": "x",
-            "data_policy": {"disposition": "approved",
-                            "max_classification": "internal"},
-        }]},
-    }))
+    policy = DataFlowPolicy.from_config(
+        _config(
+            {
+                "profile": "internal-pilot",
+                "data": {"default_classification": "confidential"},
+                "models": {
+                    "providers": [
+                        {
+                            "type": "openai_compatible",
+                            "name": "x",
+                            "data_policy": {
+                                "disposition": "approved",
+                                "max_classification": "internal",
+                            },
+                        }
+                    ]
+                },
+            }
+        )
+    )
     # No classification passed: the default is used, and it exceeds the max.
     assert policy.evaluate("x").allowed is False
     assert policy.evaluate("x").classification == CONFIDENTIAL
@@ -290,20 +347,28 @@ def test_the_default_classification_applies_when_none_is_given():
 
 
 def test_enforcement_is_off_in_development():
-    policy = DataFlowPolicy.from_config(_config({
-        "profile": "development",
-        "models": {"providers": [{"type": "openai_compatible", "name": "x"}]},
-    }))
+    policy = DataFlowPolicy.from_config(
+        _config(
+            {
+                "profile": "development",
+                "models": {"providers": [{"type": "openai_compatible", "name": "x"}]},
+            }
+        )
+    )
     assert policy.enabled is False
     assert policy.evaluate("x", RESTRICTED).allowed is True
 
 
 def test_enforcement_is_on_for_internal_pilot_and_production():
     for profile in ("internal-pilot", "production"):
-        policy = DataFlowPolicy.from_config(_config({
-            "profile": profile,
-            "models": {"providers": [{"type": "openai_compatible", "name": "x"}]},
-        }))
+        policy = DataFlowPolicy.from_config(
+            _config(
+                {
+                    "profile": profile,
+                    "models": {"providers": [{"type": "openai_compatible", "name": "x"}]},
+                }
+            )
+        )
         assert policy.enabled is True, profile
         assert policy.evaluate("x", PUBLIC).allowed is False, profile
 
@@ -316,20 +381,28 @@ def test_enforcement_stays_off_when_no_provider_is_declared_in_config():
 
 
 def test_enforcement_can_be_turned_on_explicitly_in_development():
-    policy = DataFlowPolicy.from_config(_config({
-        "profile": "development",
-        "data": {"enforce_egress_policy": True},
-        "models": {"providers": [{"type": "openai_compatible", "name": "x"}]},
-    }))
+    policy = DataFlowPolicy.from_config(
+        _config(
+            {
+                "profile": "development",
+                "data": {"enforce_egress_policy": True},
+                "models": {"providers": [{"type": "openai_compatible", "name": "x"}]},
+            }
+        )
+    )
     assert policy.enabled is True
     assert policy.evaluate("x", PUBLIC).allowed is False
 
 
 def test_enforcement_can_be_turned_off_explicitly_in_production():
     """An operator who says no must be obeyed, and the setting is auditable."""
-    policy = DataFlowPolicy.from_config(_config({
-        "profile": "production",
-        "data": {"enforce_egress_policy": False},
-        "models": {"providers": [{"type": "openai_compatible", "name": "x"}]},
-    }))
+    policy = DataFlowPolicy.from_config(
+        _config(
+            {
+                "profile": "production",
+                "data": {"enforce_egress_policy": False},
+                "models": {"providers": [{"type": "openai_compatible", "name": "x"}]},
+            }
+        )
+    )
     assert policy.enabled is False

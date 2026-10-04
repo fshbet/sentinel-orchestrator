@@ -12,8 +12,9 @@ and every loop has a hard stop.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any
 
 from ..domain.enums import ModelCapability, OrchestrationPattern, RiskLevel
 from ..domain.models import Task, ValidationSpec

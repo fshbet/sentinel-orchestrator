@@ -13,8 +13,10 @@ interrupted execution picks up from persisted state rather than starting over
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from datetime import UTC
+from typing import Any
 
 from ...agents.capabilities import CapabilityRegistry
 from ...agents.registry import AgentRegistry
@@ -39,6 +41,7 @@ from ...tools.registry import ToolContext, ToolRegistry
 from ...validation.gates import GateRunner, can_complete
 from ...validation.validators import ValidationContext, ValidatorRegistry
 from ..domain.enums import (
+    TERMINAL_EXECUTION_STATUSES,
     ApprovalStatus,
     Confidence,
     ExecutionStatus,
@@ -46,7 +49,6 @@ from ..domain.enums import (
     PlanStrategy,
     RiskLevel,
     TaskStatus,
-    TERMINAL_EXECUTION_STATUSES,
     WaitReason,
 )
 from ..domain.models import (
@@ -73,6 +75,10 @@ from .nested import resolve_runtime_name
 @dataclass
 class EngineConfig:
     workspace: str | None = None
+    # Where published artifacts are written as files. Distinct from the
+    # workspace: an agent may publish a result without being allowed to write
+    # into the project it is working on.
+    artifact_dir: str | None = None
     default_limits: ResourceLimits = field(default_factory=ResourceLimits)
     # Grant an agent that declares no permissions the safe default set.
     default_permissions: tuple[str, ...] = perms.SAFE_DEFAULTS
@@ -129,20 +135,20 @@ class ExecutionEngine:
             return
         try:
             getattr(self.metrics, method)(*args, **kwargs)
-        except Exception:  # noqa: BLE001 - deliberate: metrics never fail work
+        except Exception:  # noqa: BLE001, S110 - deliberate: metrics never fail work
             pass
 
     def _record_terminal(self, execution: Execution) -> None:
         """Outcome and wall time, once, when an execution stops for good."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         try:
             started = execution.created_at
             if isinstance(started, str):
                 started = datetime.fromisoformat(started)
             if started.tzinfo is None:
-                started = started.replace(tzinfo=timezone.utc)
-            seconds = (datetime.now(timezone.utc) - started).total_seconds()
+                started = started.replace(tzinfo=UTC)
+            seconds = (datetime.now(UTC) - started).total_seconds()
         except Exception:  # noqa: BLE001 - a bad timestamp is not worth failing on
             seconds = 0.0
         self._record(
@@ -202,19 +208,19 @@ class ExecutionEngine:
         # How long this sat between being created and being picked up. The
         # signal that says "add capacity" rather than "the models are slow".
         if execution.status is ExecutionStatus.CREATED:
-            from datetime import datetime, timezone
+            from datetime import datetime
 
             try:
                 created = execution.created_at
                 if isinstance(created, str):
                     created = datetime.fromisoformat(created)
                 if created.tzinfo is None:
-                    created = created.replace(tzinfo=timezone.utc)
+                    created = created.replace(tzinfo=UTC)
                 self._record(
                     "queue_wait",
-                    max(0.0, (datetime.now(timezone.utc) - created).total_seconds()),
+                    max(0.0, (datetime.now(UTC) - created).total_seconds()),
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110
                 pass
 
         while True:
@@ -364,7 +370,10 @@ class ExecutionEngine:
 
         if execution.plan is None:
             plan = await self.c.planner.plan(execution, choice, planning_context)
-        elif execution.plan.strategy is PlanStrategy.ITERATIVE and not execution.plan.complete:
+        elif (
+            execution.plan.strategy is PlanStrategy.ITERATIVE
+            and not execution.plan.complete
+        ):
             plan = await self.c.planner.plan_next(execution, choice, planning_context)
         else:
             plan = await self.c.planner.replan(
@@ -528,12 +537,13 @@ class ExecutionEngine:
             tools=self.c.tools,
             tool_context=ToolContext(
                 execution_id=execution.id,
-                scope=PermissionScope(
-                    permissions=tuple(perms.ALL), tools=("*",)
-                ),
+                scope=PermissionScope(permissions=tuple(perms.ALL), tools=("*",)),
                 workspace=self.config.workspace,
             ),
             workspace=self.config.workspace,
+            # The store boundary, so artifact_exists can confirm a
+            # recorded location is actually inside it.
+            extras={"artifact_dir": self.config.artifact_dir},
         )
         outcome = await self.c.gates.run_for_objective(execution, context)
         execution.confidence = outcome.confidence
@@ -562,17 +572,13 @@ class ExecutionEngine:
     async def _review(self, execution: Execution) -> Execution:
         allowed, reason = can_complete(execution)
         if not allowed:
-            self.audit.record(
-                "review.blocked", execution_id=execution.id, reason=reason
-            )
+            self.audit.record("review.blocked", execution_id=execution.id, reason=reason)
             return await self._fail(execution, reason)
 
         execution.summary = self._summarise(execution)
         if execution.confidence in (Confidence.FAILED, Confidence.BLOCKED):
             execution.confidence = Confidence.UNCERTAIN
-        self.c.state.transition(
-            execution, ExecutionStatus.COMPLETED, reason=reason
-        )
+        self.c.state.transition(execution, ExecutionStatus.COMPLETED, reason=reason)
         self.audit.record(
             EventType.EXECUTION_COMPLETED,
             execution_id=execution.id,
@@ -652,6 +658,7 @@ class ExecutionEngine:
                     agent=agent,
                     scope=scope,
                     workspace=self.config.workspace,
+                    artifact_dir=self.config.artifact_dir,
                 )
             )
         except ApprovalRequired as exc:
@@ -708,14 +715,18 @@ class ExecutionEngine:
                 workspace=self.config.workspace,
             ),
             workspace=self.config.workspace,
+            # The store boundary, so artifact_exists can confirm a
+            # recorded location is actually inside it.
+            extras={"artifact_dir": self.config.artifact_dir},
         )
         outcome = await self.c.gates.run_for_task(execution, task, context)
 
         if not outcome.passed:
             self.c.recovery.handle_validation_failure(
-                execution, task, outcome.message, validators=[
-                    r.validator for r in outcome.failed_mandatory
-                ]
+                execution,
+                task,
+                outcome.message,
+                validators=[r.validator for r in outcome.failed_mandatory],
             )
             return
 
@@ -728,8 +739,21 @@ class ExecutionEngine:
         )
         self.c.recovery.mark_recovered(execution, task)
         if task.result is not None:
-            execution.artifacts.extend(task.result.artifacts)
+            # Deduplicate by stored location, keeping the newest record for
+            # each file. Keying on the *name* would be wrong now that a
+            # collision with different content is versioned to a new filename:
+            # two records legitimately share a name while describing two
+            # different files, and dropping one would lose a deliverable.
+            # Records with no location (reference-only artifacts) fall back to
+            # the name, which is all they have.
             for artifact in task.result.artifacts:
+                key = artifact.location or f"name:{artifact.name}"
+                execution.artifacts[:] = [
+                    existing
+                    for existing in execution.artifacts
+                    if (existing.location or f"name:{existing.name}") != key
+                ]
+                execution.artifacts.append(artifact)
                 self.c.context.remember_artifact(execution, artifact)
         self.c.context.remember_result(execution, task)
         self.audit.record(
@@ -1021,7 +1045,9 @@ class ExecutionEngine:
         )
 
     def _needs_approval(self, task: Task) -> bool:
-        return task.requires_approval or task.risk.rank >= self.config.approval_threshold.rank
+        return (
+            task.requires_approval or task.risk.rank >= self.config.approval_threshold.rank
+        )
 
     @staticmethod
     def _approval_granted(execution: Execution, task: Task) -> bool:
@@ -1098,7 +1124,9 @@ class ExecutionEngine:
 
     async def _pause(self, execution: Execution) -> Execution:
         if execution.status is not ExecutionStatus.PAUSED:
-            self.c.state.transition(execution, ExecutionStatus.PAUSING, reason="pause requested")
+            self.c.state.transition(
+                execution, ExecutionStatus.PAUSING, reason="pause requested"
+            )
             self.c.state.transition(execution, ExecutionStatus.PAUSED, reason="paused")
         self.audit.record(EventType.EXECUTION_PAUSED, execution_id=execution.id)
         return await self.c.state.persist(execution)
@@ -1114,7 +1142,9 @@ class ExecutionEngine:
                     self.c.state.transition_task(
                         execution, task, TaskStatus.CANCELLED, reason="execution cancelled"
                     )
-            self.c.state.transition(execution, ExecutionStatus.CANCELLED, reason="cancelled")
+            self.c.state.transition(
+                execution, ExecutionStatus.CANCELLED, reason="cancelled"
+            )
         execution.confidence = Confidence.BLOCKED
         self.audit.record(EventType.EXECUTION_CANCELLED, execution_id=execution.id)
         return await self.c.state.persist(execution)
@@ -1133,7 +1163,9 @@ class ExecutionEngine:
 
     @staticmethod
     def _summarise(execution: Execution) -> str:
-        succeeded = [t for t in execution.tasks.values() if t.status is TaskStatus.SUCCEEDED]
+        succeeded = [
+            t for t in execution.tasks.values() if t.status is TaskStatus.SUCCEEDED
+        ]
         lines = [
             f"Objective: {execution.objective}",
             f"Completed {len(succeeded)} of {len(execution.tasks)} tasks.",
@@ -1173,7 +1205,10 @@ def _chosen_route(result: Any, routes: Sequence[str]) -> str | None:
 
     text = " ".join(
         part
-        for part in (getattr(result, "summary", ""), output if isinstance(output, str) else "")
+        for part in (
+            getattr(result, "summary", ""),
+            output if isinstance(output, str) else "",
+        )
         if isinstance(part, str)
     ).lower()
     mentioned = [route for route in routes if route.lower() in text]

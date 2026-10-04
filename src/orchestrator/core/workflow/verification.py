@@ -13,8 +13,9 @@ a normal, working situation, not a defect.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
 
 from ...errors import InvalidWorkflow
 from ..domain.models import Plan, Task
@@ -64,8 +65,7 @@ class VerificationReport:
         if self.ok:
             return
         raise InvalidWorkflow(
-            "plan cannot be executed: "
-            + "; ".join(i.message for i in self.errors),
+            "plan cannot be executed: " + "; ".join(i.message for i in self.errors),
             execution_id=execution_id,
             issues=[i.to_dict() for i in self.issues],
         )
@@ -132,9 +132,7 @@ def _verify_task(
     # created for them, and an error when it cannot.
     for capability in task.required_capabilities:
         known = context.capabilities is not None and context.capabilities.has(capability)
-        provided = context.agents is not None and bool(
-            context.agents.providing(capability)
-        )
+        provided = context.agents is not None and bool(context.agents.providing(capability))
         if known or provided:
             continue
         report.issues.append(

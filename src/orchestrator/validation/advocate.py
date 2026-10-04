@@ -27,8 +27,9 @@ Three rules keep it honest rather than merely negative:
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Sequence
+from typing import Any
 
 from ..core.domain.enums import Confidence, EvidenceType, KnowledgeStatus
 from ..core.domain.jsonio import extract_json
@@ -271,9 +272,7 @@ class DevilsAdvocateValidator(Validator):
                 if (n := sum(1 for o in challenge.objections if o.severity == severity))
             )
             message = f"{len(challenge.objections)} objection(s): {counts}"
-            confidence = (
-                Confidence.UNCERTAIN if challenge.critical else Confidence.LIKELY
-            )
+            confidence = Confidence.UNCERTAIN if challenge.critical else Confidence.LIKELY
 
         return self._result(
             spec,
@@ -285,10 +284,7 @@ class DevilsAdvocateValidator(Validator):
                 Evidence(
                     type=EvidenceType.MODEL_JUDGEMENT,
                     source="devils_advocate",
-                    summary=(
-                        challenge.strongest_case_against
-                        or message
-                    )[:500],
+                    summary=(challenge.strongest_case_against or message)[:500],
                     detail=challenge.to_dict(),
                     confidence=confidence,
                     # An argument is an inference, however well made.

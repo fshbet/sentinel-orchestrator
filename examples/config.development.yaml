@@ -210,8 +210,50 @@ tools:
     allowed_hosts: []
 
 mcp:
-  servers: {}
-  policies: []
+  # Servers the orchestrator connects to as a client. Transport is inferred:
+  # `command` means stdio, `url` means streamable HTTP. An unreachable server
+  # never breaks startup — it is recorded as disconnected with its error and
+  # its tools are simply absent, so a laptop with no node installed still runs.
+  #
+  # Run `orchestrator mcp` after editing this to see what connected, what each
+  # server offered, and which of its tools were refused and why.
+  servers:
+    # `command` is written the way you would type it, on every platform. The
+    # transport resolves it with shutil.which before spawning, so the Windows
+    # .cmd and .exe shims are found without this file naming them.
+    filesystem:
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
+      env: {}
+      cwd: null
+      timeout: 120
+
+    # git:
+    #   command: uvx
+    #   args: ["mcp-server-git"]
+
+    # remote:
+    #   url: https://mcp.example.com/mcp
+    #   headers:
+    #     Authorization: "Bearer ${MCP_TOKEN}"
+    #   timeout: 60
+
+  # A discovered tool is not a trusted tool. These ceilings are what turns a
+  # server's self-reported annotations into an authorisation decision, and a
+  # tool assessed above `max_risk` is refused however it describes itself.
+  policies:
+    - server: filesystem
+      # Read-only: with a medium ceiling the server's write_file, edit_file and
+      # get_file_info are refused, and its ten read tools register. Raise this
+      # only when you actually want an agent writing through MCP, and prefer
+      # the built-in fs.* tools for that, which are confined to the workspace.
+      max_risk: medium
+      require_approval_above: low
+      allow_tools: []
+      deny_tools: ["*delete*", "*move*"]
+      permissions: [mcp.invoke]
+      trusted: false
+      timeout: 60
 
 skills:
   directories: [".orchestrator/skills"]

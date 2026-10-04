@@ -165,12 +165,14 @@ def get(name: str | None) -> Profile:
     """Look up a profile, or fail with the list of real ones."""
     resolved = (name or DEFAULT_PROFILE).strip().lower()
     # A common near-miss worth accepting rather than lecturing about.
-    resolved = {"internal_pilot": INTERNAL_PILOT, "prod": PRODUCTION,
-                "dev": DEVELOPMENT}.get(resolved, resolved)
+    resolved = {
+        "internal_pilot": INTERNAL_PILOT,
+        "prod": PRODUCTION,
+        "dev": DEVELOPMENT,
+    }.get(resolved, resolved)
     if resolved not in _PROFILES:
         raise ConfigurationError(
-            f"unknown profile {name!r}. Valid profiles are: "
-            f"{', '.join(PROFILES)}",
+            f"unknown profile {name!r}. Valid profiles are: {', '.join(PROFILES)}",
             profile=name,
             valid=list(PROFILES),
         )
@@ -280,8 +282,7 @@ def apply_defaults(raw: dict[str, Any], profile: Profile) -> dict[str, Any]:
             merged[section].setdefault(key, value)
 
     setdefault("policy", "default_effect", profile.default_effect)
-    setdefault("policy", "require_explicit_tool_grant",
-               profile.require_explicit_tool_grant)
+    setdefault("policy", "require_explicit_tool_grant", profile.require_explicit_tool_grant)
     setdefault("policy", "approval_threshold", profile.approval_threshold)
 
     tools = merged.setdefault("tools", {})
@@ -319,13 +320,18 @@ def explain(raw: dict[str, Any], profile: Profile) -> dict[str, Any]:
         "http_tools": {
             "enabled": bool(http.get("enabled")),
             "allowed_hosts": list(http.get("allowed_hosts") or []),
-            "allowed_methods": list(http.get("allowed_methods") or ["GET", "HEAD", "OPTIONS"]),
+            "allowed_methods": list(
+                http.get("allowed_methods") or ["GET", "HEAD", "OPTIONS"]
+            ),
             "https_only": not http.get("allow_http", profile.allow_http),
-            "private_networks": http.get("allow_private_networks",
-                                         profile.allow_private_networks),
+            "private_networks": http.get(
+                "allow_private_networks", profile.allow_private_networks
+            ),
         },
         "process_tools_enabled": bool(
-            (tools.get("process") or {}).get("enabled") if isinstance(tools, dict) else False
+            (tools.get("process") or {}).get("enabled")
+            if isinstance(tools, dict)
+            else False
         ),
         "api_authentication_required": profile.require_api_authentication,
     }
