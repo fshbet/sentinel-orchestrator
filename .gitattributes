@@ -1,0 +1,16 @@
+# Shell scripts keep LF in every working tree, including on Windows.
+#
+# deployment/smoke-test.sh is a CI entry point - the compose-smoke job invokes
+# it directly - and the committed content is already LF. The problem is the
+# checkout: with core.autocrlf=true a Windows clone rewrites it to CRLF, and
+# while Git Bash tolerates that, a real Linux bash does not:
+#
+#     syntax error near unexpected token $'{\r'
+#
+# which means one checkout runs under Git Bash and fails under WSL or a
+# container, for a reason that looks nothing like line endings.
+#
+# Scoped to *.sh on purpose. A blanket `* text=auto eol=lf` would renormalise
+# every file in the repository, which is a much larger change than the problem
+# being fixed.
+*.sh text eol=lf

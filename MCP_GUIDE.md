@@ -194,6 +194,22 @@ project has to be installed and on the path, with the virtualenv active:
 pip install -e ".[cli,yaml]"
 ```
 
+**If the client reports `CONNECTION_CLOSED`, or that the server failed to
+start, this is why.** The command could not be found, so the process died
+before writing a byte and the client saw the pipe close. It looks like a
+protocol fault and is not one. Check it directly:
+
+```bash
+orchestrator mcp-serve < /dev/null     # "command not found" => the venv is not active
+```
+
+The entry deliberately names the console script rather than a path into
+`.venv`. A path would have to pick a side: Windows puts scripts in
+`.venv/Scripts` with an `.exe` suffix, every other platform uses `.venv/bin`
+without one, so either spelling breaks half the clones. `python -m
+orchestrator.cli.main mcp-serve` buys nothing either - it needs the package in
+the *active* interpreter, which is the same prerequisite written less clearly.
+
 `yaml` is not optional for this. `mcp-serve` builds the platform, and building
 it reads the workflow definitions that ship with the repository — those are
 YAML, so without PyYAML the server exits before it speaks a word, reporting a

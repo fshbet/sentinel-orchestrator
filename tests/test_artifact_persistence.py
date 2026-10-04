@@ -122,11 +122,25 @@ def test_a_reference_artifact_is_published_without_a_write(tmp_path):
     sys.platform == "win32",
     reason="POSIX mode bits are not enforced for the owner on Windows",
 )
+@pytest.mark.skipif(
+    # hasattr, because os.geteuid does not exist on Windows and a bare call
+    # here would raise during collection rather than skip.
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root bypasses permission bits, so a read-only store is still "
+    "writable and this test would pass without exercising anything",
+)
 def test_an_unwritable_store_fails_the_publication(tmp_path):
     """The production case: the store exists and cannot be written.
 
     Previously this logged a warning, returned an artifact id, and let the run
     complete successfully having stored nothing.
+
+    Skipped as root rather than left to pass. Root ignores the mode bits this
+    relies on, so the write succeeds, no ToolError is raised, and the failure
+    reads as a bug in the code under test instead of a property of the user
+    running it. The behaviour itself stays covered everywhere by
+    test_a_store_path_blocked_by_a_file_fails_the_publication, which provokes
+    the same OSError without depending on permissions.
     """
     store = tmp_path / "artifacts"
     store.mkdir()

@@ -63,3 +63,14 @@ deployment/caddy-data/
 .idea/
 .DS_Store
 Thumbs.db
+
+# ---------------------------------------------------------------------------
+# Output from using the application
+# ---------------------------------------------------------------------------
+#
+# The development workspace defaults to ".", so an orchestrated run publishes
+# its artifacts into the repository root. These two directories are what this
+# machine produced while the platform was being exercised: they are output,
+# not source, and without naming them `git add -A` picks them up.
+/tetris/
+/tic-tac-toe/
