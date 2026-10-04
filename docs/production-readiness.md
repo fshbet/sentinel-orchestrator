@@ -188,7 +188,7 @@ correctness, and never claims to.
 | Proxy denies loopback, RFC1918, link-local, metadata, off-allowlist | Complete | `smoke-test.sh` §12 (5 destinations) |
 | Proxy is proven alive before its denials are believed | Complete | `smoke-test.sh` §12 — a dead proxy previously made every denial pass |
 | Proxy logs prove traffic passed through it | Complete | `smoke-test.sh` §12 reads `/var/log/squid/access.log` |
-| Application-level egress validation retained | Complete | `test_egress.py` (43 tests) — defence in depth |
+| Application-level egress validation retained | Complete | `test_egress.py` (47 tests) — defence in depth |
 | TLS termination with identity headers stripped | Complete | `smoke-test.sh` §13 |
 | Orchestrator publishes no host ports | Complete | `smoke-test.sh` §13 |
 | Metrics restricted to the monitoring network **and** an admin token | Complete | `Caddyfile` `@metrics` · `smoke-test.sh` §8 |

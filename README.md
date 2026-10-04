@@ -205,7 +205,7 @@ systems. Control operations stay behind `--allow-control`.
 
 ## Status
 
-782 tests. 40 of them need a reachable PostgreSQL instance and skip without
+811 tests. 40 of them need a reachable PostgreSQL instance and skip without
 one; CI supplies one and fails the build if they skip there, because a gated
 suite that quietly skips proves nothing. A handful more are POSIX-only (file
 modes, symlinks) and skip on Windows. Every subsystem is exercised against real

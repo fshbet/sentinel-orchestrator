@@ -328,7 +328,7 @@ egress decisions name which provider received data at what classification.
 
 ```bash
 orchestrator validate            # posture, migration notices, config problems
-python -m pytest tests/ -q       # 731 tests; 42 skip without PostgreSQL
+python -m pytest tests/ -q       # 811 tests; 40 skip without PostgreSQL
 ```
 
 Then confirm by hand:
